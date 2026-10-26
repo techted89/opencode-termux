@@ -22,8 +22,8 @@ env:
   ZIG_VERSION: "0.15.2"
   # golem10 has 15GB RAM — limit parallelism to avoid OOM during WebKit link
   JOBS: "4"
-  # Use the large spindle drive for working directory
-  WORK_DIR: "/mnt/spindrive/opencode-build"
+  # Use workspace-relative build dir for ubuntu-latest compatibility
+  WORK_DIR: "./build"
 
 jobs:
   build:
