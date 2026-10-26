@@ -43,7 +43,7 @@ jobs:
         run: |
           mkdir -p "$WORK_DIR"
           echo "Work directory: $WORK_DIR"
-          df -h /mnt/spindrive
+          df -h .
 
       # =============================================
       # Install build dependencies
