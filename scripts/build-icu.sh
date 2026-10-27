@@ -42,7 +42,7 @@ if [ ! -f "${DEPS_PREFIX_ABS}/lib/libicuuc.a" ]; then
         "${ICU_SRC_ABS}/source/configure" \
             --host=aarch64-linux-android \
             --with-cross-build="${ICU_HOST_BUILD}" \
-            --prefix="${DEPS_PREFIX}" \
+            --prefix="${DEPS_PREFIX_ABS}" \
             CC="$ANDROID_CC" \
             CXX="$ANDROID_CXX" \
             AR="$ANDROID_AR" \
