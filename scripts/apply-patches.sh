@@ -38,21 +38,22 @@ cd "$REPO_ROOT"
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
     echo ">>> Cloning WebKit at commit ${WEBKIT_COMMIT}..."
     mkdir -p "$WEBKIT_SRC"
-    cd "$WEBKIT_SRC"
-    git init
-    git remote add origin https://github.com/oven-sh/WebKit.git
-    git fetch --depth=1 origin "${WEBKIT_COMMIT}"
-    git checkout FETCH_HEAD
+    echo "WEBKIT_SRC absolute: $(cd "$WEBKIT_SRC" && pwd)"
+    (cd "$WEBKIT_SRC" && \
+        git init && \
+        git remote add origin https://github.com/oven-sh/WebKit.git && \
+        git fetch --depth=1 origin "${WEBKIT_COMMIT}" && \
+        git checkout FETCH_HEAD)
 else
     echo ">>> WebKit source already exists at $WEBKIT_SRC"
 fi
 
 # Apply WebKit patch
 echo ">>> Applying WebKit Android patches..."
-cd "$WEBKIT_SRC"
-git checkout -- . 2>/dev/null || true  # Reset any previous patches
-git apply --stat "$REPO_ROOT/patches/webkit/android-support.patch"
-git apply "$REPO_ROOT/patches/webkit/android-support.patch"
+(cd "$WEBKIT_SRC" && \
+    git checkout -- . 2>/dev/null || true && \
+    git apply --stat "$REPO_ROOT/patches/webkit/android-support.patch" && \
+    git apply "$REPO_ROOT/patches/webkit/android-support.patch")
 echo "    WebKit patches applied successfully"
 
 echo ""
