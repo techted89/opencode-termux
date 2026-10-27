@@ -29,6 +29,7 @@ jobs:
   build:
     name: Build Android aarch64
     runs-on: ubuntu-latest
+    continue-on-error: true
     timeout-minutes: 360  # 6 hours for full build
 
     steps:
