@@ -12,7 +12,7 @@ separate packages and commands, and v2 never overwrites v1 files.
 
 | | Command | Status | Runtime |
 |---|---|---|---|
-| OpenCode 1.x | `opencode` | stable | patched Bun 1.2.13 + WebKit/JSC, built from source |
+| OpenCode 1.x | `opencode` | stable | patched Bun 1.3.14 + WebKit/JSC, built from source |
 | OpenCode 2.x | `opencode2` | pre-release | official Bun 1.4.2 android target + OpenTUI 0.5.10 |
 
 Install the v2 pre-release alongside v1:
@@ -247,7 +247,7 @@ Bun has zero Android support. Every patch falls into one of these categories:
 
 Since `bun build --compile` has no Android cross-compilation target, we use a manual approach:
 
-1. Use **host Bun (v1.3.2)** to `bun build --compile` OpenCode for the host platform
+1. Use **host Bun (v1.3.14)** to `bun build --compile` OpenCode for the host platform
 2. Extract the serialized **module graph** from the host standalone binary by locating the `\n---- Bun! ----\n` trailer and reading the `Offsets` struct
 3. Patch the module graph in-place (fix `undici` global reference)
 4. Before bundling, swap x86_64 `libopentui.so` with the ARM64 Android-built version, so it gets embedded in the module graph
@@ -261,15 +261,15 @@ The standalone binary format:
 [total_byte_count as u64 LE (8 bytes)]
 ```
 
-### Why host Bun must be pinned to v1.3.2
+### Why host Bun must be pinned to v1.3.14
 
 The `CompiledModuleGraphFile` struct layout changed between Bun versions:
 - **Bun <= 1.3.2**: 36-byte stride (4 StringPointers + 3 u8 + 1 padding)
 - **Bun >= 1.3.11**: 52-byte stride (6 StringPointers + 4 u8)
 
-The target Android Bun is v1.2.13, which expects 36-byte stride. If the host Bun produces 52-byte modules, the target reads garbage and OOMs immediately (RSS jumps to 1GB on startup).
+The target Android Bun is v1.3.14, which expects 52-byte stride. The host Bun must match the target version to ensure the module graph is compatible.
 
-We can't use Bun 1.2.13 as host either, because OpenCode's monorepo uses `catalog:` workspace protocol (added in Bun 1.3.x) -- `bun install` fails. **Bun 1.3.2 is the sweet spot**: supports `catalog:` AND produces compatible 36-byte modules.
+We can't use Bun 1.2.13 as host either, because OpenCode's monorepo uses `catalog:` workspace protocol (added in Bun 1.3.x) -- `bun install` fails. **Bun 1.3.14 is the sweet spot**: supports `catalog:` AND produces compatible 52-byte modules.
 
 ---
 
@@ -294,7 +294,7 @@ We can't use Bun 1.2.13 as host either, because OpenCode's monorepo uses `catalo
 
 | Workaround | Why |
 |-----------|-----|
-| Host Bun pinned to 1.3.2 | Module graph struct compatibility between host and target Bun versions (see above) |
+| Host Bun pinned to 1.3.14 | Module graph struct compatibility between host and target Bun versions (see above) |
 | `close_range()` replaced with `/proc/self/fd` iteration | Android seccomp blocks the `close_range` syscall in app processes |
 | `preadv2`/`pwritev2`/`epoll_pwait2` return ENOSYS | Seccomp may block these; callers fall back gracefully |
 | `setenv("JSC_*")` before `JSC::initialize()` | Options API is reset during initialization; env vars survive the reset |
@@ -370,15 +370,15 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 
 | Component | Version/Commit | Why pinned |
 |-----------|---------------|------------|
-| Bun (target) | v1.2.13 (tag `bun-v1.2.13`) | Proven working, patches validated |
-| Bun (host) | v1.3.2 | Module graph compat (36-byte stride) + catalog: support |
-| WebKit/JSC | `017930eb` (oven-sh/WebKit) | Matches Bun v1.2.13's expected WebKit |
-| ICU | 75.1 | Matches Bun v1.2.13's expected ICU |
+| Bun (target) | v1.3.14 (tag `bun-v1.3.14`) | Matches OpenCode 1.18.0+ runtime |
+| Bun (host) | v1.3.14 | Module graph compat (52-byte stride) + catalog: support |
+| WebKit/JSC | `017930eb` (oven-sh/WebKit) | Matches Bun v1.3.14's expected WebKit |
+| ICU | 75.1 | Matches Bun v1.3.14's expected ICU |
 | Android NDK | r28b (28.1.13356709) | Clang 19, stable |
 | Android API level | 24 (Android 7.0+) | Minimum for 64-bit Termux |
 | Zig (for opentui) | 0.15.2 | Latest stable, Android target support |
-| OpenCode | 1.3.13 | Current release |
-| TinyCC | `b91835d8` (oven-sh/tinycc) | Matches Bun v1.2.13's expected TinyCC |
+| OpenCode | 1.18.0+ | Current release |
+| TinyCC | `b91835d8` (oven-sh/tinycc) | Matches Bun v1.3.14's expected TinyCC |
 
 ---
 
@@ -399,7 +399,7 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 | Rust | stable | lol-html crate (with `aarch64-linux-android` target) |
 | Go | 1.20+ | BoringSSL |
 | Zig | 0.15.2 | libopentui.so build |
-| Bun | 1.3.2 (host, pinned) | OpenCode bundling |
+| Bun | 1.3.14 (host, pinned) | OpenCode bundling |
 | Python3 | 3.8+ | WebKit code generation |
 | Ruby | 2.7+ | WebKit code generation |
 | Perl | 5.20+ | WebKit code generation |
