@@ -32,6 +32,7 @@ git checkout -- . 2>/dev/null || true  # Reset any previous patches
 git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
 git apply "$REPO_ROOT/patches/bun/android-support.patch"
 echo "    Bun patches applied successfully"
+cd "$REPO_ROOT"
 
 # --- Clone WebKit ---
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
