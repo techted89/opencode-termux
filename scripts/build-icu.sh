@@ -25,10 +25,9 @@ echo "=== Building ICU ${ICU_VERSION} for Android aarch64 ==="
 if [ ! -d "$ICU_SRC/source" ]; then
     echo ">>> Downloading ICU ${ICU_VERSION}..."
     mkdir -p "$ICU_SRC"
-    cd "$WORK_DIR"
-    curl -LO "$ICU_URL"
-    tar xf "$ICU_TARBALL" -C "$ICU_SRC" --strip-components=1
-    rm -f "$ICU_TARBALL"
+    curl -L -o "${REPO_ROOT}/${WORK_DIR}/${ICU_TARBALL}" "$ICU_URL"
+    tar xf "${REPO_ROOT}/${WORK_DIR}/${ICU_TARBALL}" -C "$ICU_SRC" --strip-components=1
+    rm -f "${REPO_ROOT}/${WORK_DIR}/${ICU_TARBALL}"
 fi
 
 # Build host ICU tools first (required for cross-build)
