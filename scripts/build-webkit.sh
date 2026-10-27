@@ -68,9 +68,9 @@ cmake \
     -DCMAKE_C_FLAGS_RELEASE="$RELEASE_FLAGS" \
     -DCMAKE_CXX_FLAGS_RELEASE="$RELEASE_FLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
-    -DICU_ROOT="$DEPS_PREFIX" \
-    -DICU_INCLUDE_DIRS="$DEPS_PREFIX/include" \
-    "$WEBKIT_SRC"
+    -DICU_ROOT="${REPO_ROOT}/${DEPS_PREFIX}" \
+    -DICU_INCLUDE_DIRS="${REPO_ROOT}/${DEPS_PREFIX}/include" \
+    "${REPO_ROOT}/${WEBKIT_SRC}"
 
 echo ""
 echo ">>> Configure complete. Building..."
