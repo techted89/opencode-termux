@@ -12,7 +12,7 @@ on:
         default: '1.19.4'
 
 env:
-  BUN_VERSION: "1.2.13"
+  BUN_VERSION: "1.3.14"
   OPENCODE_VERSION: "1.19.4"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
@@ -123,15 +123,14 @@ jobs:
       - name: Install Bun (host, pinned for module graph compatibility)
         run: |
           # CRITICAL: The host Bun version must produce a module graph format
-          # compatible with the target Bun (v1.2.13).
+          # compatible with the target Bun (v1.3.14).
           #
           # The standalone binary's CompiledModuleGraphFile struct changed:
-          #   - Bun <= 1.3.2:  36-byte stride (compatible with 1.2.x target)
-          #   - Bun >= 1.3.11: 52-byte stride (INCOMPATIBLE — causes OOM)
+          #   - Bun <= 1.3.2:  36-byte stride
+          #   - Bun >= 1.3.11: 52-byte stride (matches 1.3.14 target)
           #
-          # We can't use 1.2.13 as host because it lacks catalog: workspace
-          # protocol support needed by OpenCode's monorepo. Pin to 1.3.2.
-          HOST_BUN_VERSION="1.3.2"
+          # Host Bun pinned to 1.3.14 to match target and support catalog: workspace.
+          HOST_BUN_VERSION="1.3.14"
           GOT="$(bun --version 2>/dev/null || true)"
           if [ "$GOT" != "$HOST_BUN_VERSION" ]; then
             echo "Installing Bun v${HOST_BUN_VERSION} (current: ${GOT:-none})..."

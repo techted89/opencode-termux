@@ -8,7 +8,7 @@ set -euo pipefail
 export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Versions
-export BUN_VERSION="${BUN_VERSION:-1.2.13}"
+export BUN_VERSION="${BUN_VERSION:-1.3.14}"
 export BUN_TAG="bun-v${BUN_VERSION}"
 export WEBKIT_COMMIT="${WEBKIT_COMMIT:-017930ebf915121f8f593bef61cbbca82d78132d}"
 export ICU_VERSION="${ICU_VERSION:-75.1}"
