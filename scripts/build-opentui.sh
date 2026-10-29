@@ -85,6 +85,24 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-opentui" ]; then
     rm -f "$WORK_DIR_ABS/uucode.tar.gz"
 fi
 
+# ghostty is lazy=true and ghosttyVtAvailable() returns false for android
+# (abi is .android, not .musl/.gnu), so it's never resolved. Remove it from
+# build.zig.zon to avoid zig complaining about a missing vendored path.
+if [ -f "$OPENTUI_ZIG_DIR/build.zig.zon" ]; then
+    echo ">>> Removing ghostty dependency from build.zig.zon (not needed for android)..."
+    # Delete the ghostty block from build.zig.zon
+    python3 -c "
+import re
+with open('$OPENTUI_ZIG_DIR/build.zig.zon') as f:
+    content = f.read()
+# Remove .ghostty = .{...,\n    } block
+content = re.sub(r'\n\s*\.ghostty\s*=\s*\.\{\s*\n\s*\.path\s*=\s*\"zig-deps/ghostty\",\s*\n\s*\.lazy\s*=\s*true,\s*\n\s*\},', '', content)
+with open('$OPENTUI_ZIG_DIR/build.zig.zon', 'w') as f:
+    f.write(content)
+print('done')
+" || true
+fi
+
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
 
