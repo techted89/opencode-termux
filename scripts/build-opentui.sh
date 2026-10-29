@@ -12,16 +12,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+# Use absolute paths so they remain valid after cd into subdirectories
+REPO_ROOT_ABS="$(cd "$REPO_ROOT" && pwd)"
+OPENTUI_SRC_ABS="${REPO_ROOT_ABS}/${OPENTUI_SRC#./}"
+
 ZIG_BIN="${ZIG_BIN:-zig}"
 
 echo "=== Building libopentui.so for Android aarch64 ==="
 
 # Clone opentui if needed
-if [ ! -d "$OPENTUI_SRC/.git" ]; then
+if [ ! -d "$OPENTUI_SRC_ABS/.git" ]; then
     echo ">>> Cloning opentui..."
-    git clone --depth 1 https://github.com/anomalyco/opentui.git "$OPENTUI_SRC"
+    git clone --depth 1 https://github.com/anomalyco/opentui.git "$OPENTUI_SRC_ABS"
 else
-    echo ">>> opentui source exists at $OPENTUI_SRC"
+    echo ">>> opentui source exists at $OPENTUI_SRC_ABS"
 fi
 
 # Apply Android libc linking patch
@@ -30,7 +34,7 @@ fi
 OPENTUI_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
 if [ -f "$OPENTUI_PATCH" ]; then
     echo ">>> Applying opentui Android patch..."
-    cd "$OPENTUI_SRC"
+    cd "$OPENTUI_SRC_ABS"
     if ! git apply --check "$OPENTUI_PATCH" 2>/dev/null; then
         echo "    Patch already applied or does not apply cleanly, skipping"
     else
@@ -39,7 +43,7 @@ if [ -f "$OPENTUI_PATCH" ]; then
     fi
 fi
 
-OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
+OPENTUI_ZIG_DIR="$OPENTUI_SRC_ABS/packages/core/src/zig"
 
 if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
     echo "ERROR: build.zig not found at $OPENTUI_ZIG_DIR"
@@ -62,7 +66,7 @@ if [ ! -f "$LIBOPENTUI" ]; then
     echo "ERROR: libopentui.so not found"
     echo "  Expected at: $LIBOPENTUI"
     echo "  Searching for any libopentui.so under opentui-src..."
-    find "$OPENTUI_SRC" -name "libopentui.so" -type f 2>/dev/null || true
+    find "$OPENTUI_SRC_ABS" -name "libopentui.so" -type f 2>/dev/null || true
     exit 1
 fi
 

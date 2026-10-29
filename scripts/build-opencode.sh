@@ -19,27 +19,34 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+# Use absolute paths so they remain valid after cd into subdirectories
+REPO_ROOT_ABS="$(cd "$REPO_ROOT" && pwd)"
+OPENCODE_SRC_ABS="${REPO_ROOT_ABS}/${OPENCODE_SRC#./}"
+OPENTUI_SRC_ABS="${REPO_ROOT_ABS}/${OPENTUI_SRC#./}"
+BUN_BUILD_ABS="${REPO_ROOT_ABS}/${BUN_BUILD#./}"
+DIST_DIR_ABS="${REPO_ROOT_ABS}/${DIST_DIR#./}"
+
 HOST_BUN="${HOST_BUN:-bun}"
 
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
 
 # Clone OpenCode if needed
-if [ ! -d "$OPENCODE_SRC/.git" ]; then
+if [ ! -d "$OPENCODE_SRC_ABS/.git" ]; then
     echo ">>> Cloning OpenCode..."
-    git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "$OPENCODE_SRC"
+    git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "$OPENCODE_SRC_ABS"
 else
-    echo ">>> OpenCode source exists at $OPENCODE_SRC"
+    echo ">>> OpenCode source exists at $OPENCODE_SRC_ABS"
 fi
 
-OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
+OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
-cd "$OPENCODE_SRC"
+cd "$OPENCODE_SRC_ABS"
 "$HOST_BUN" install
 
 # Find the Android bun binary
-ANDROID_BUN="$BUN_BUILD/bun"
+ANDROID_BUN="$BUN_BUILD_ABS/bun"
 if [ ! -f "$ANDROID_BUN" ]; then
     echo "ERROR: Android bun binary not found at $ANDROID_BUN"
     echo "       Run scripts/build-bun.sh first."
@@ -48,7 +55,7 @@ fi
 
 # Find ARM64 libopentui.so
 # build.zig installs to ../lib/{target} relative to the zig dir
-ARM64_LIBOPENTUI="$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android/libopentui.so"
+ARM64_LIBOPENTUI="$OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android/libopentui.so"
 if [ ! -f "$ARM64_LIBOPENTUI" ]; then
     echo "ERROR: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI"
     echo "       Run scripts/build-opentui.sh first."
@@ -59,9 +66,9 @@ fi
 # OpenCode uses @opentui/core-linux-x64 which has the x86_64 version
 OPENTUI_NODE_MODULE=""
 for candidate in \
-    "$OPENCODE_SRC/node_modules/@opentui/core-linux-x64/libopentui.so" \
+    "$OPENCODE_SRC_ABS/node_modules/@opentui/core-linux-x64/libopentui.so" \
     "$OPENCODE_PKG/node_modules/@opentui/core-linux-x64/libopentui.so" \
-    "$OPENCODE_SRC/node_modules/.bun/@opentui+core-linux-x64@*/node_modules/@opentui/core-linux-x64/libopentui.so"
+    "$OPENCODE_SRC_ABS/node_modules/.bun/@opentui+core-linux-x64@*/node_modules/@opentui/core-linux-x64/libopentui.so"
 do
     # Handle glob
     for f in $candidate; do
@@ -85,7 +92,7 @@ else
 fi
 
 # Create dist directory
-mkdir -p "$DIST_DIR"
+mkdir -p "$DIST_DIR_ABS"
 
 # Run the TypeScript build script
 # Copy it into the OpenCode tree so Bun can resolve @opentui/solid/bun-plugin
@@ -98,7 +105,7 @@ cd "$OPENCODE_PKG"
 
 OPENCODE_VERSION="$OPENCODE_VERSION" \
     ANDROID_BUN="$ANDROID_BUN" \
-    OUTPUT_DIR="$DIST_DIR" \
+    OUTPUT_DIR="$DIST_DIR_ABS" \
     OPENCODE_DIR="$OPENCODE_PKG" \
     "$HOST_BUN" run "$BUILD_SCRIPT_LOCAL"
 
@@ -112,7 +119,7 @@ if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
 fi
 
 # Verify output
-OPENCODE_BINARY="$DIST_DIR/opencode"
+OPENCODE_BINARY="$DIST_DIR_ABS/opencode"
 if [ ! -f "$OPENCODE_BINARY" ]; then
     echo "ERROR: OpenCode binary not found at $OPENCODE_BINARY"
     exit 1
