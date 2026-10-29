@@ -56,10 +56,33 @@ if [ -f "$OPENTUI_PATCH" ]; then
 fi
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC_ABS/packages/native"
+OPENTUI_ZIG_DEPS="$OPENTUI_ZIG_DIR/zig-deps"
 
 if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
     echo "ERROR: build.zig not found at $OPENTUI_ZIG_DIR"
     exit 1
+fi
+
+# Vendored zig dependencies required by build.zig.zon:
+#   yoga      -> zig-deps/yoga  (required unconditionally)
+#   uucode    -> zig-deps/uucode-opentui (lazy dep, may be needed)
+# These are not committed to the opentui git repo; populate them now.
+mkdir -p "$OPENTUI_ZIG_DEPS"
+
+if [ ! -d "$OPENTUI_ZIG_DEPS/yoga" ]; then
+    echo ">>> Downloading yoga zig dependency..."
+    curl -fsSL "https://github.com/facebook/yoga/archive/refs/tags/v3.2.1.tar.gz" -o "$WORK_DIR_ABS/yoga.tar.gz"
+    mkdir -p "$OPENTUI_ZIG_DEPS/yoga"
+    tar -xzf "$WORK_DIR_ABS/yoga.tar.gz" --strip-components=1 -C "$OPENTUI_ZIG_DEPS/yoga"
+    rm -f "$WORK_DIR_ABS/yoga.tar.gz"
+fi
+
+if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-opentui" ]; then
+    echo ">>> Downloading uucode-opentui zig dependency..."
+    curl -fsSL "https://github.com/jacobsandlund/uucode/archive/8ad04b756f85a5ba1ac8d2b8cb48d0946f06b630.tar.gz" -o "$WORK_DIR_ABS/uucode.tar.gz"
+    mkdir -p "$OPENTUI_ZIG_DEPS/uucode-opentui"
+    tar -xzf "$WORK_DIR_ABS/uucode.tar.gz" --strip-components=1 -C "$OPENTUI_ZIG_DEPS/uucode-opentui"
+    rm -f "$WORK_DIR_ABS/uucode.tar.gz"
 fi
 
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
