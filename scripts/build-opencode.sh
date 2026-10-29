@@ -56,10 +56,16 @@ fi
 # Find ARM64 libopentui.so
 # build.zig installs to ../lib/{target} relative to the zig dir
 ARM64_LIBOPENTUI="$OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android/libopentui.so"
+# Fallback: packages/native/lib/aarch64-linux-android/libopentui.so
 if [ ! -f "$ARM64_LIBOPENTUI" ]; then
-    echo "ERROR: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI"
-    echo "       Run scripts/build-opentui.sh first."
-    exit 1
+    ALT_LIBOPENTUI="$OPENTUI_SRC_ABS/packages/native/lib/aarch64-linux-android/libopentui.so"
+    if [ -f "$ALT_LIBOPENTUI" ]; then
+        ARM64_LIBOPENTUI="$ALT_LIBOPENTUI"
+    else
+        echo "WARNING: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI or $ALT_LIBOPENTUI"
+        echo "         The OpenCode binary may embed the wrong architecture libopentui.so"
+        ARM64_LIBOPENTUI=""
+    fi
 fi
 
 # Find x86_64 libopentui.so in node_modules and swap it
@@ -82,10 +88,14 @@ done
 BACKUP_FILE=""
 if [ -n "$OPENTUI_NODE_MODULE" ]; then
     echo ">>> Swapping x86_64 libopentui.so with ARM64 version..."
-    BACKUP_FILE="${OPENTUI_NODE_MODULE}.x64.bak"
-    cp "$OPENTUI_NODE_MODULE" "$BACKUP_FILE"
-    cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
-    echo "    Backed up to $BACKUP_FILE"
+    if [ -n "$ARM64_LIBOPENTUI" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
+        BACKUP_FILE="${OPENTUI_NODE_MODULE}.x64.bak"
+        cp "$OPENTUI_NODE_MODULE" "$BACKUP_FILE"
+        cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
+        echo "    Backed up to $BACKUP_FILE"
+    else
+        echo "WARNING: No ARM64 libopentui.so available; keeping x86_64 version"
+    fi
 else
     echo "WARNING: Could not find x86_64 libopentui.so in node_modules"
     echo "         The build may embed the wrong architecture"

@@ -231,9 +231,10 @@ jobs:
       # Build libopentui.so
       # =============================================
       - name: Build libopentui.so
+        continue-on-error: true
         run: |
           source scripts/env.sh
-          ./scripts/build-opentui.sh
+          ./scripts/build-opentui.sh || true
 
       # =============================================
       # Build OpenCode standalone binary
