@@ -36,10 +36,12 @@ fi
 # Update toolchain with current paths
 # The toolchain file has hardcoded paths that need to be parameterized
 # We create a temporary toolchain with correct paths
-TOOLCHAIN_TMP="$WORK_DIR/webkit-android-toolchain.cmake"
+WORK_DIR_ABS="$(cd "$WORK_DIR" && pwd)"
+DEPS_PREFIX_ABS="${WORK_DIR_ABS}/deps-android/prefix"
+TOOLCHAIN_TMP="${WORK_DIR_ABS}/webkit-android-toolchain.cmake"
 sed \
     -e "s|/home/guy/Android/Sdk/ndk/28.1.13356709|${ANDROID_NDK_HOME}|g" \
-    -e "s|/home/guy/opencode-termux/deps-android/prefix|${DEPS_PREFIX}|g" \
+    -e "s|/home/guy/opencode-termux/deps-android/prefix|${DEPS_PREFIX_ABS}|g" \
     "$TOOLCHAIN" > "$TOOLCHAIN_TMP"
 
 # Create build directory
