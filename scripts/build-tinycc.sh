@@ -13,16 +13,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+# Use absolute paths so they remain valid after cd
+WORK_DIR_ABS="$(cd "$REPO_ROOT" && pwd)/${WORK_DIR#./}"
 TINYCC_COMMIT="${TINYCC_COMMIT:-b91835d8701523e895a2b447713630069514e291}"
-TINYCC_SRC="${WORK_DIR}/tinycc-src"
+TINYCC_SRC="${WORK_DIR_ABS}/tinycc-src"
 TINYCC_BUILD="${TINYCC_SRC}/build-android"
+WEBKIT_OUTPUT_ABS="$(cd "$REPO_ROOT" && pwd)/${WEBKIT_OUTPUT#./}"
 
 echo "=== Building TinyCC (libtcc.a) for Android aarch64 ==="
 
 # Check if already built and installed
-if [ -f "$WEBKIT_OUTPUT/lib/libtcc.a" ]; then
-    echo ">>> libtcc.a already exists at $WEBKIT_OUTPUT/lib/libtcc.a"
-    ls -la "$WEBKIT_OUTPUT/lib/libtcc.a"
+if [ -f "$WEBKIT_OUTPUT_ABS/lib/libtcc.a" ]; then
+    echo ">>> libtcc.a already exists at $WEBKIT_OUTPUT_ABS/lib/libtcc.a"
+    ls -la "$WEBKIT_OUTPUT_ABS/lib/libtcc.a"
     exit 0
 fi
 
@@ -84,11 +87,11 @@ echo ">>> Creating libtcc.a..."
 $ANDROID_AR rcs "$TINYCC_BUILD/libtcc.a" "$TINYCC_BUILD"/*.o
 
 # Install to webkit-android output (where Bun's CMake expects it)
-mkdir -p "$WEBKIT_OUTPUT/lib"
-cp "$TINYCC_BUILD/libtcc.a" "$WEBKIT_OUTPUT/lib/"
+mkdir -p "$WEBKIT_OUTPUT_ABS/lib"
+cp "$TINYCC_BUILD/libtcc.a" "$WEBKIT_OUTPUT_ABS/lib/"
 
 echo ""
 echo "=== TinyCC build complete ==="
-echo "Library: $WEBKIT_OUTPUT/lib/libtcc.a"
-ls -la "$WEBKIT_OUTPUT/lib/libtcc.a"
-file "$WEBKIT_OUTPUT/lib/libtcc.a"
+echo "Library: $WEBKIT_OUTPUT_ABS/lib/libtcc.a"
+ls -la "$WEBKIT_OUTPUT_ABS/lib/libtcc.a"
+file "$WEBKIT_OUTPUT_ABS/lib/libtcc.a"
