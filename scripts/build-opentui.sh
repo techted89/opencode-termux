@@ -85,22 +85,24 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-opentui" ]; then
     rm -f "$WORK_DIR_ABS/uucode.tar.gz"
 fi
 
-# ghostty is lazy=true and ghosttyVtAvailable() returns false for android
-# (abi is .android, not .musl/.gnu), so it's never resolved. Remove it from
-# build.zig.zon to avoid zig complaining about a missing vendored path.
-if [ -f "$OPENTUI_ZIG_DIR/build.zig.zon" ]; then
-    echo ">>> Removing ghostty dependency from build.zig.zon (not needed for android)..."
-    # Delete the ghostty block from build.zig.zon
-    python3 -c "
-import re
-with open('$OPENTUI_ZIG_DIR/build.zig.zon') as f:
-    content = f.read()
-# Remove .ghostty = .{...,\n    } block
-content = re.sub(r'\n\s*\.ghostty\s*=\s*\.\{\s*\n\s*\.path\s*=\s*\"zig-deps/ghostty\",\s*\n\s*\.lazy\s*=\s*true,\s*\n\s*\},', '', content)
-with open('$OPENTUI_ZIG_DIR/build.zig.zon', 'w') as f:
-    f.write(content)
-print('done')
-" || true
+if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
+    echo ">>> Downloading ghostty zig dependency..."
+    curl -fsSL "https://github.com/ghostty-org/ghostty/archive/aeda37b305ee3d897ff1bfeddfe39d7fa9366a74.tar.gz" -o "$WORK_DIR_ABS/ghostty.tar.gz"
+    mkdir -p "$WORK_DIR_ABS/ghostty-staging"
+    tar -xzf "$WORK_DIR_ABS/ghostty.tar.gz" --strip-components=1 -C "$WORK_DIR_ABS/ghostty-staging"
+    mkdir -p "$OPENTUI_ZIG_DEPS/ghostty/pkg"
+    cp "$WORK_DIR_ABS/ghostty-staging/LICENSE" "$OPENTUI_ZIG_DEPS/ghostty/LICENSE"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/include" "$OPENTUI_ZIG_DEPS/ghostty/include"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/src" "$OPENTUI_ZIG_DEPS/ghostty/src"
+    rm -rf "$OPENTUI_ZIG_DEPS/ghostty/src/font/res"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/android-ndk" "$OPENTUI_ZIG_DEPS/ghostty/pkg/android-ndk"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/apple-sdk" "$OPENTUI_ZIG_DEPS/ghostty/pkg/apple-sdk"
+    # Custom ghostty build files from opentui vendor
+    curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig"
+    curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig.zon" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
+    curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-shared-deps.patch" -o "$WORK_DIR_ABS/ghostty-shared-deps.patch"
+    (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$WORK_DIR_ABS/ghostty-shared-deps.patch") || true
+    rm -rf "$WORK_DIR_ABS/ghostty-staging" "$WORK_DIR_ABS/ghostty.tar.gz" "$WORK_DIR_ABS/ghostty-shared-deps.patch"
 fi
 
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
