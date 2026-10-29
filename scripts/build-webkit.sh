@@ -45,11 +45,13 @@ sed \
     "$TOOLCHAIN" > "$TOOLCHAIN_TMP"
 
 # Create build directory
-mkdir -p "$WEBKIT_BUILD"
+WEBKIT_BUILD_ABS="$(cd "$REPO_ROOT" && pwd)/${WEBKIT_BUILD#./}"
+WEBKIT_OUTPUT_ABS="$(cd "$REPO_ROOT" && pwd)/${WEBKIT_OUTPUT#./}"
+mkdir -p "$WEBKIT_BUILD_ABS"
 
 # Configure
 echo ">>> Configuring WebKit/JSC..."
-cd "$WEBKIT_BUILD"
+cd "$WEBKIT_BUILD_ABS"
 
 cmake \
     -G Ninja \
@@ -70,73 +72,73 @@ cmake \
     -DCMAKE_C_FLAGS_RELEASE="$RELEASE_FLAGS" \
     -DCMAKE_CXX_FLAGS_RELEASE="$RELEASE_FLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
-    -DICU_ROOT="${REPO_ROOT}/${DEPS_PREFIX}" \
-    -DICU_INCLUDE_DIRS="${REPO_ROOT}/${DEPS_PREFIX}/include" \
+    -DICU_ROOT="${DEPS_PREFIX_ABS}" \
+    -DICU_INCLUDE_DIRS="${DEPS_PREFIX_ABS}/include" \
     "${REPO_ROOT}/${WEBKIT_SRC}"
 
 echo ""
 echo ">>> Configure complete. Building..."
 
 # Build JSC target
-cmake --build "$WEBKIT_BUILD" --config Release --target jsc -- -j"$JOBS"
+cmake --build "$WEBKIT_BUILD_ABS" --config Release --target jsc -- -j"$JOBS"
 
 # Build private headers
 echo ">>> Building private headers..."
-ninja -C "$WEBKIT_BUILD" JavaScriptCore_CopyPrivateHeaders 2>/dev/null || true
+ninja -C "$WEBKIT_BUILD_ABS" JavaScriptCore_CopyPrivateHeaders 2>/dev/null || true
 
 echo ""
-echo ">>> Build complete. Installing to $WEBKIT_OUTPUT..."
+echo ">>> Build complete. Installing to $WEBKIT_OUTPUT_ABS..."
 
 # Install to output directory
-mkdir -p "$WEBKIT_OUTPUT"/{lib,include/JavaScriptCore,include/wtf,include/bmalloc,include/unicode}
+mkdir -p "$WEBKIT_OUTPUT_ABS"/{lib,include/JavaScriptCore,include/wtf,include/bmalloc,include/unicode}
 
 # Copy static libraries
-cp "$WEBKIT_BUILD"/lib/*.a "$WEBKIT_OUTPUT/lib/" 2>/dev/null || true
+cp "$WEBKIT_BUILD_ABS"/lib/*.a "$WEBKIT_OUTPUT_ABS/lib/" 2>/dev/null || true
 
 # Copy ICU libraries
-cp "$DEPS_PREFIX/lib/libicudata.a" "$WEBKIT_OUTPUT/lib/"
-cp "$DEPS_PREFIX/lib/libicui18n.a" "$WEBKIT_OUTPUT/lib/"
-cp "$DEPS_PREFIX/lib/libicuuc.a" "$WEBKIT_OUTPUT/lib/"
+cp "$DEPS_PREFIX_ABS/lib/libicudata.a" "$WEBKIT_OUTPUT_ABS/lib/"
+cp "$DEPS_PREFIX_ABS/lib/libicui18n.a" "$WEBKIT_OUTPUT_ABS/lib/"
+cp "$DEPS_PREFIX_ABS/lib/libicuuc.a" "$WEBKIT_OUTPUT_ABS/lib/"
 
 # Copy cmakeconfig.h
-cp "$WEBKIT_BUILD/cmakeconfig.h" "$WEBKIT_OUTPUT/include/"
+cp "$WEBKIT_BUILD_ABS/cmakeconfig.h" "$WEBKIT_OUTPUT_ABS/include/"
 
 # Copy headers
-find "$WEBKIT_BUILD/JavaScriptCore/DerivedSources/" -name "*.h" -exec cp {} "$WEBKIT_OUTPUT/include/JavaScriptCore/" \;
-find "$WEBKIT_BUILD/JavaScriptCore/Headers/JavaScriptCore/" -name "*.h" -exec cp {} "$WEBKIT_OUTPUT/include/JavaScriptCore/" \; 2>/dev/null || true
-find "$WEBKIT_BUILD/JavaScriptCore/PrivateHeaders/JavaScriptCore/" -name "*.h" -exec cp {} "$WEBKIT_OUTPUT/include/JavaScriptCore/" \; 2>/dev/null || true
+find "$WEBKIT_BUILD_ABS/JavaScriptCore/DerivedSources/" -name "*.h" -exec cp {} "$WEBKIT_OUTPUT_ABS/include/JavaScriptCore/" \;
+find "$WEBKIT_BUILD_ABS/JavaScriptCore/Headers/JavaScriptCore/" -name "*.h" -exec cp {} "$WEBKIT_OUTPUT_ABS/include/JavaScriptCore/" \; 2>/dev/null || true
+find "$WEBKIT_BUILD_ABS/JavaScriptCore/PrivateHeaders/JavaScriptCore/" -name "*.h" -exec cp {} "$WEBKIT_OUTPUT_ABS/include/JavaScriptCore/" \; 2>/dev/null || true
 
 # Copy WTF headers
-cp -r "$WEBKIT_BUILD/WTF/Headers/wtf/"* "$WEBKIT_OUTPUT/include/wtf/" 2>/dev/null || true
+cp -r "$WEBKIT_BUILD_ABS/WTF/Headers/wtf/"* "$WEBKIT_OUTPUT_ABS/include/wtf/" 2>/dev/null || true
 
 # Copy bmalloc headers
-cp -r "$WEBKIT_BUILD/bmalloc/Headers/bmalloc/"* "$WEBKIT_OUTPUT/include/bmalloc/" 2>/dev/null || true
+cp -r "$WEBKIT_BUILD_ABS/bmalloc/Headers/bmalloc/"* "$WEBKIT_OUTPUT_ABS/include/bmalloc/" 2>/dev/null || true
 
 # Copy ICU unicode headers
-cp -r "$DEPS_PREFIX/include/unicode/"* "$WEBKIT_OUTPUT/include/unicode/"
+cp -r "$DEPS_PREFIX_ABS/include/unicode/"* "$WEBKIT_OUTPUT_ABS/include/unicode/"
 
 # Create cmakeconfig.h at root of WEBKIT_OUTPUT (needed by SetupWebKit.cmake)
-cp "$WEBKIT_BUILD/cmakeconfig.h" "$WEBKIT_OUTPUT/"
-echo "#define BUN_WEBKIT_VERSION \"${WEBKIT_COMMIT}\"" >> "$WEBKIT_OUTPUT/cmakeconfig.h"
+cp "$WEBKIT_BUILD_ABS/cmakeconfig.h" "$WEBKIT_OUTPUT_ABS/"
+echo "#define BUN_WEBKIT_VERSION \"${WEBKIT_COMMIT}\"" >> "$WEBKIT_OUTPUT_ABS/cmakeconfig.h"
 
 # Set up directory structure that SetupWebKit.cmake expects for WEBKIT_LOCAL
-mkdir -p "$WEBKIT_OUTPUT/JavaScriptCore/Headers/JavaScriptCore"
-mkdir -p "$WEBKIT_OUTPUT/JavaScriptCore/PrivateHeaders/JavaScriptCore"
-mkdir -p "$WEBKIT_OUTPUT/JavaScriptCore/DerivedSources/inspector"
-mkdir -p "$WEBKIT_OUTPUT/bmalloc/Headers"
-mkdir -p "$WEBKIT_OUTPUT/WTF/Headers"
+mkdir -p "$WEBKIT_OUTPUT_ABS/JavaScriptCore/Headers/JavaScriptCore"
+mkdir -p "$WEBKIT_OUTPUT_ABS/JavaScriptCore/PrivateHeaders/JavaScriptCore"
+mkdir -p "$WEBKIT_OUTPUT_ABS/JavaScriptCore/DerivedSources/inspector"
+mkdir -p "$WEBKIT_OUTPUT_ABS/bmalloc/Headers"
+mkdir -p "$WEBKIT_OUTPUT_ABS/WTF/Headers"
 
 # Copy headers into the WEBKIT_LOCAL layout
-cp -r "$WEBKIT_OUTPUT/include/JavaScriptCore/"* "$WEBKIT_OUTPUT/JavaScriptCore/Headers/JavaScriptCore/" 2>/dev/null || true
-cp -r "$WEBKIT_OUTPUT/include/JavaScriptCore/"* "$WEBKIT_OUTPUT/JavaScriptCore/PrivateHeaders/JavaScriptCore/" 2>/dev/null || true
-find "$WEBKIT_BUILD/JavaScriptCore/DerivedSources/" -name "*.json" -exec cp {} "$WEBKIT_OUTPUT/JavaScriptCore/DerivedSources/inspector/" \; 2>/dev/null || true
-cp -r "$WEBKIT_OUTPUT/include/bmalloc" "$WEBKIT_OUTPUT/bmalloc/Headers/" 2>/dev/null || true
-cp -r "$WEBKIT_OUTPUT/include/wtf" "$WEBKIT_OUTPUT/WTF/Headers/" 2>/dev/null || true
+cp -r "$WEBKIT_OUTPUT_ABS/include/JavaScriptCore/"* "$WEBKIT_OUTPUT_ABS/JavaScriptCore/Headers/JavaScriptCore/" 2>/dev/null || true
+cp -r "$WEBKIT_OUTPUT_ABS/include/JavaScriptCore/"* "$WEBKIT_OUTPUT_ABS/JavaScriptCore/PrivateHeaders/JavaScriptCore/" 2>/dev/null || true
+find "$WEBKIT_BUILD_ABS/JavaScriptCore/DerivedSources/" -name "*.json" -exec cp {} "$WEBKIT_OUTPUT_ABS/JavaScriptCore/DerivedSources/inspector/" \; 2>/dev/null || true
+cp -r "$WEBKIT_OUTPUT_ABS/include/bmalloc" "$WEBKIT_OUTPUT_ABS/bmalloc/Headers/" 2>/dev/null || true
+cp -r "$WEBKIT_OUTPUT_ABS/include/wtf" "$WEBKIT_OUTPUT_ABS/WTF/Headers/" 2>/dev/null || true
 
 echo ""
 echo "=== WebKit/JSC build complete ==="
 echo "Libraries:"
-ls -la "$WEBKIT_OUTPUT/lib/"
+ls -la "$WEBKIT_OUTPUT_ABS/lib/"
 echo ""
 echo "Headers:"
-find "$WEBKIT_OUTPUT/include" -maxdepth 2 -type d
+find "$WEBKIT_OUTPUT_ABS/include" -maxdepth 2 -type d
