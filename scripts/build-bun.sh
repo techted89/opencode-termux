@@ -20,15 +20,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+# Use absolute paths so they remain valid after cd into build directories
+REPO_ROOT_ABS="$(cd "$REPO_ROOT" && pwd)"
+BUN_SRC_ABS="${REPO_ROOT_ABS}/${BUN_SRC#./}"
+BUN_BUILD_ABS="${REPO_ROOT_ABS}/${BUN_BUILD#./}"
+WEBKIT_OUTPUT_ABS="${REPO_ROOT_ABS}/${WEBKIT_OUTPUT#./}"
+
 echo "=== Building Bun v${BUN_VERSION} for Android aarch64 ==="
 
 # Verify prerequisites
-if [ ! -d "$BUN_SRC" ]; then
+if [ ! -d "$BUN_SRC_ABS" ]; then
     echo "ERROR: Bun source not found. Run scripts/apply-patches.sh first."
     exit 1
 fi
 
-if [ ! -d "$WEBKIT_OUTPUT/lib" ]; then
+if [ ! -d "$WEBKIT_OUTPUT_ABS/lib" ]; then
     echo "ERROR: WebKit not built. Run scripts/build-webkit.sh first."
     exit 1
 fi
@@ -47,17 +53,17 @@ fi
 # Fix: Symlink .zig-cache -> the explicit cache dir so both paths resolve to
 # the same physical location. Clear both first to avoid stale entries.
 echo ">>> Setting up Zig cache directories..."
-rm -rf "$BUN_BUILD/cache/zig" "$BUN_SRC/.zig-cache"
-mkdir -p "$BUN_BUILD/cache/zig/local"
-mkdir -p "$BUN_BUILD/cache/zig/global"
-ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
-echo "    Symlinked $BUN_SRC/.zig-cache -> $BUN_BUILD/cache/zig/local"
+rm -rf "$BUN_BUILD_ABS/cache/zig" "$BUN_SRC_ABS/.zig-cache"
+mkdir -p "$BUN_BUILD_ABS/cache/zig/local"
+mkdir -p "$BUN_BUILD_ABS/cache/zig/global"
+ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
+echo "    Symlinked $BUN_SRC_ABS/.zig-cache -> $BUN_BUILD_ABS/cache/zig/local"
 
 # Create build directory
-mkdir -p "$BUN_BUILD"
+mkdir -p "$BUN_BUILD_ABS"
 
 # CMake toolchain is inside the patched Bun source
-BUN_TOOLCHAIN="$BUN_SRC/cmake/toolchains/android-aarch64.cmake"
+BUN_TOOLCHAIN="$BUN_SRC_ABS/cmake/toolchains/android-aarch64.cmake"
 if [ ! -f "$BUN_TOOLCHAIN" ]; then
     echo "ERROR: Android toolchain not found at $BUN_TOOLCHAIN"
     echo "       Did apply-patches.sh run successfully?"
@@ -66,7 +72,7 @@ fi
 
 # Configure
 echo ">>> Configuring Bun..."
-cd "$BUN_BUILD"
+cd "$BUN_BUILD_ABS"
 
 cmake \
     -G Ninja \
@@ -76,8 +82,8 @@ cmake \
     -DENABLE_LTO=OFF \
     -DBUN_LINK_ONLY=OFF \
     -DWEBKIT_LOCAL=ON \
-    -DWEBKIT_PATH="$WEBKIT_OUTPUT" \
-    "$BUN_SRC"
+    -DWEBKIT_PATH="$WEBKIT_OUTPUT_ABS" \
+    "$BUN_SRC_ABS"
 
 echo ""
 echo ">>> Configure complete."
@@ -86,14 +92,14 @@ echo ">>> Configure complete."
 # The clone-zig target downloads Bun's custom Zig fork to $BUN_SRC/vendor/zig/.
 # We need Zig downloaded first so we can patch posix.zig before compilation starts.
 echo ">>> Downloading Zig vendor (clone-zig target)..."
-cd "$BUN_BUILD"
+cd "$BUN_BUILD_ABS"
 ninja clone-zig || true  # May not exist as a standalone target in all versions
 
 # Apply Zig vendor patch AFTER download, BEFORE build
-ZIG_POSIX="$BUN_SRC/vendor/zig/lib/std/posix.zig"
+ZIG_POSIX="$BUN_SRC_ABS/vendor/zig/lib/std/posix.zig"
 if [ -f "$ZIG_POSIX" ]; then
     echo ">>> Applying Zig vendor patch (sigaction/sigprocmask Android bypass)..."
-    cd "$BUN_SRC"
+    cd "$BUN_SRC_ABS"
     if patch --dry-run -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" >/dev/null 2>&1; then
         patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch"
         echo "    Zig patch applied successfully."
@@ -117,8 +123,8 @@ fi
 
 # Build
 echo ">>> Building Bun (this will take 30-45 minutes)..."
-echo "    .zig-cache -> $(readlink -f "$BUN_SRC/.zig-cache" 2>/dev/null || echo 'NOT A SYMLINK')"
-cd "$BUN_BUILD"
+echo "    .zig-cache -> $(readlink -f "$BUN_SRC_ABS/.zig-cache" 2>/dev/null || echo 'NOT A SYMLINK')"
+cd "$BUN_BUILD_ABS"
 ninja -j"$JOBS" 2>&1 || {
     echo ""
     echo ">>> Build failed. Checking if Zig was downloaded during the build..."
@@ -126,16 +132,16 @@ ninja -j"$JOBS" 2>&1 || {
     # apply it now and retry
     if [ -f "$ZIG_POSIX" ] && ! grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" 2>/dev/null; then
         echo ">>> Zig downloaded during build but patch not applied. Applying now..."
-        cd "$BUN_SRC"
+        cd "$BUN_SRC_ABS"
         patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" || {
             echo "ERROR: Zig patch failed to apply"
             exit 1
         }
         echo "    Zig patch applied. Clearing Zig cache and rebuilding..."
-        rm -rf "$BUN_BUILD/cache/zig" "$BUN_SRC/.zig-cache"
-        mkdir -p "$BUN_BUILD/cache/zig/local" "$BUN_BUILD/cache/zig/global"
-        ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
-        cd "$BUN_BUILD"
+        rm -rf "$BUN_BUILD_ABS/cache/zig" "$BUN_SRC_ABS/.zig-cache"
+        mkdir -p "$BUN_BUILD_ABS/cache/zig/local" "$BUN_BUILD_ABS/cache/zig/global"
+        ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
+        cd "$BUN_BUILD_ABS"
         ninja -j"$JOBS"
     else
         echo "ERROR: Build failed (Zig patch was already applied — different error)"
@@ -144,10 +150,10 @@ ninja -j"$JOBS" 2>&1 || {
 }
 
 # Verify output
-BUN_BINARY="$BUN_BUILD/bun"
+BUN_BINARY="$BUN_BUILD_ABS/bun"
 if [ ! -f "$BUN_BINARY" ]; then
     # Try bun-profile (unstripped)
-    BUN_BINARY="$BUN_BUILD/bun-profile"
+    BUN_BINARY="$BUN_BUILD_ABS/bun-profile"
 fi
 
 if [ ! -f "$BUN_BINARY" ]; then
