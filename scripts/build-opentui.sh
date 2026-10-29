@@ -21,9 +21,6 @@ OPENTUI_VERSION="${OPENTUI_VERSION:-0.5.10}"
 OPENTUI_COMMIT_OR_TAG="v${OPENTUI_VERSION}"
 ZIG_BIN="${ZIG_BIN:-zig}"
 
-# Bionic sysroot shim dir (merged NDK usr/include for translate-c)
-BIONIC_SYSROOT_INC="${WORK_DIR_ABS}/bionic-include"
-
 echo "=== Building libopentui.so for Android aarch64 (opentui v${OPENTUI_VERSION}) ==="
 
 # Clone opentui at the pinned version the android patch targets
@@ -52,31 +49,6 @@ if [ -f "$OPENTUI_PATCH" ]; then
         echo "    Patch applied successfully"
     fi
 fi
-
-# Build a merged bionic sysroot include dir so Zig translate-c can parse bionic
-# headers (nullability annotations are expanded by the shim headers).
-rm -rf "$BIONIC_SYSROOT_INC"
-mkdir -p "$BIONIC_SYSROOT_INC"
-cp -a "$NDK_SYSROOT/usr/include/." "$BIONIC_SYSROOT_INC/"
-cp -a "$NDK_SYSROOT/usr/include/aarch64-linux-android/." "$BIONIC_SYSROOT_INC/"
-
-# Vendored deps the shim headers reference as "../miniaudio.h" / "../yoga/yoga/Yoga.h"
-mkdir -p "$BIONIC_SYSROOT_INC/yoga"
-cp -a "$OPENTUI_SRC_ABS/packages/native/src/vendor/miniaudio/miniaudio.h" "$BIONIC_SYSROOT_INC/miniaudio.h"
-cp -a "$OPENTUI_SRC_ABS/packages/native/zig-deps/yoga/yoga" "$BIONIC_SYSROOT_INC/yoga/yoga"
-mkdir -p "$BIONIC_SYSROOT_INC/__opentui"
-cat > "$BIONIC_SYSROOT_INC/__opentui/miniaudio_shimmed.h" <<'EOF'
-#define _Nullable
-#define _Nonnull
-#include "../miniaudio.h"
-EOF
-cat > "$BIONIC_SYSROOT_INC/__opentui/Yoga_shimmed.h" <<'EOF'
-#define _Nullable
-#define _Nonnull
-#include "../yoga/yoga/Yoga.h"
-EOF
-
-export ANDROID_NDK_HOME BIONIC_SYSROOT_INC
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC_ABS/packages/native"
 
