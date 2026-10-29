@@ -19,7 +19,12 @@ WORK_DIR_ABS="${REPO_ROOT_ABS}/${WORK_DIR#./}"
 
 OPENTUI_VERSION="${OPENTUI_VERSION:-0.5.10}"
 OPENTUI_COMMIT_OR_TAG="v${OPENTUI_VERSION}"
-ZIG_BIN="${ZIG_BIN:-zig}"
+# Resolve ZIG_BIN to absolute path so it remains valid after cd
+if [ -z "$ZIG_BIN" ] || [ "$ZIG_BIN" = "zig" ]; then
+    ZIG_BIN_ABS="$(command -v zig || true)"
+else
+    ZIG_BIN_ABS="${REPO_ROOT_ABS}/${ZIG_BIN#./}"
+fi
 
 echo "=== Building libopentui.so for Android aarch64 (opentui v${OPENTUI_VERSION}) ==="
 
@@ -60,7 +65,7 @@ fi
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
 
-"$ZIG_BIN" build \
+"$ZIG_BIN_ABS" build \
     -Dlibrary-target=aarch64-linux-android \
     -Doptimize=ReleaseSafe \
     2>&1
