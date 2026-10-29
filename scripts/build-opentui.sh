@@ -79,10 +79,19 @@ fi
 
 if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-opentui" ]; then
     echo ">>> Downloading uucode-opentui zig dependency..."
-    curl -fsSL "https://github.com/jacobsandlund/uucode/archive/8ad04b756f85a5ba1ac8d2b8cb48d0946f06b630.tar.gz" -o "$WORK_DIR_ABS/uucode.tar.gz"
+    curl -fsSL "https://github.com/jacobsandlund/uucode/archive/8ad04b756f85a5ba1ac8d2b8cb48d0946f06b630.tar.gz" -o "$WORK_DIR_ABS/uucode-opentui.tar.gz"
     mkdir -p "$OPENTUI_ZIG_DEPS/uucode-opentui"
-    tar -xzf "$WORK_DIR_ABS/uucode.tar.gz" --strip-components=1 -C "$OPENTUI_ZIG_DEPS/uucode-opentui"
-    rm -f "$WORK_DIR_ABS/uucode.tar.gz"
+    tar -xzf "$WORK_DIR_ABS/uucode-opentui.tar.gz" --strip-components=1 -C "$OPENTUI_ZIG_DEPS/uucode-opentui"
+    rm -f "$WORK_DIR_ABS/uucode-opentui.tar.gz"
+fi
+
+# ghostty build.zig.zon depends on uucode-ghostty
+if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-ghostty" ]; then
+    echo ">>> Downloading uucode-ghostty zig dependency..."
+    curl -fsSL "https://github.com/jacobsandlund/uucode/archive/9d55524551411b493cca41ca06363625d90aff1e.tar.gz" -o "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
+    mkdir -p "$OPENTUI_ZIG_DEPS/uucode-ghostty"
+    tar -xzf "$WORK_DIR_ABS/uucode-ghostty.tar.gz" --strip-components=1 -C "$OPENTUI_ZIG_DEPS/uucode-ghostty"
+    rm -f "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
 fi
 
 if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
