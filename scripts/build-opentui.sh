@@ -26,6 +26,12 @@ else
     ZIG_BIN_ABS="${REPO_ROOT_ABS}/${ZIG_BIN#./}"
 fi
 
+# Android bionic sysroot + zig libc config (required by v2-0.5.10-android.patch
+# bionicSysrootInclude()/bionicSysrootLib() and android-libc-link.patch)
+export BIONIC_SYSROOT_INC="${WORK_DIR_ABS}/bionic-include"
+export ZIG_LIBC="${WORK_DIR_ABS}/bionic-libc.txt"
+export ANDROID_NDK_LIB_DIR="${NDK_SYSROOT}/usr/lib/${ANDROID_TRIPLE}/${ANDROID_API}"
+
 echo "=== Building libopentui.so for Android aarch64 (opentui v${OPENTUI_VERSION}) ==="
 
 # Clone opentui at the pinned version the android patch targets
@@ -51,6 +57,19 @@ if [ -f "$OPENTUI_PATCH" ]; then
         echo "    Patch already applied or does not apply cleanly, skipping"
     else
         git apply "$OPENTUI_PATCH"
+        echo "    Patch applied successfully"
+    fi
+fi
+
+# Apply android-libc-link.patch (links NDK libc.so stub so .so has NEEDED libc.so)
+ANDROID_LIBC_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
+if [ -f "$ANDROID_LIBC_PATCH" ]; then
+    echo ">>> Applying android-libc-link.patch..."
+    cd "$OPENTUI_SRC_ABS"
+    if ! git apply --check "$ANDROID_LIBC_PATCH" 2>/dev/null; then
+        echo "    Patch already applied or does not apply cleanly, skipping"
+    else
+        git apply "$ANDROID_LIBC_PATCH"
         echo "    Patch applied successfully"
     fi
 fi
@@ -113,6 +132,42 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$WORK_DIR_ABS/ghostty-shared-deps.patch") || true
     rm -rf "$WORK_DIR_ABS/ghostty-staging" "$WORK_DIR_ABS/ghostty.tar.gz" "$WORK_DIR_ABS/ghostty-shared-deps.patch"
 fi
+
+# Create merged bionic sysroot with shimmed C headers (required by the
+# android patch's bionicSysrootInclude() for miniaudio/yoga translate-c)
+echo ">>> Preparing bionic sysroot at $BIONIC_SYSROOT_INC..."
+rm -rf "$BIONIC_SYSROOT_INC"
+mkdir -p "$BIONIC_SYSROOT_INC"
+cp -a "$NDK_SYSROOT/usr/include/." "$BIONIC_SYSROOT_INC/"
+cp -a "$NDK_SYSROOT/usr/include/${ANDROID_TRIPLE}/." "$BIONIC_SYSROOT_INC/"
+
+# Vendored deps the shim headers reference as "../miniaudio.h" / "../yoga/yoga/Yoga.h"
+mkdir -p "$BIONIC_SYSROOT_INC/yoga"
+cp -a "$OPENTUI_SRC_ABS/packages/native/src/vendor/miniaudio/miniaudio.h" "$BIONIC_SYSROOT_INC/miniaudio.h"
+cp -a "$OPENTUI_ZIG_DEPS/yoga/yoga" "$BIONIC_SYSROOT_INC/yoga/yoga"
+mkdir -p "$BIONIC_SYSROOT_INC/__opentui"
+cat > "$BIONIC_SYSROOT_INC/__opentui/miniaudio_shimmed.h" <<'EOF'
+#define _Nullable
+#define _Nonnull
+#include "../miniaudio.h"
+EOF
+cat > "$BIONIC_SYSROOT_INC/__opentui/Yoga_shimmed.h" <<'EOF'
+#define _Nullable
+#define _Nonnull
+#include "../yoga/yoga/Yoga.h"
+EOF
+
+# Zig libc config file
+cat > "$ZIG_LIBC" <<EOF
+include_dir=$BIONIC_SYSROOT_INC
+sys_include_dir=$BIONIC_SYSROOT_INC
+crt_dir=$NDK_SYSROOT/usr/lib/${ANDROID_TRIPLE}/${ANDROID_API}
+msvc_lib_dir=
+kernel32_lib_dir=
+gcc_dir=
+EOF
+
+export ANDROID_NDK_HOME BIONIC_SYSROOT_INC ZIG_LIBC ANDROID_NDK_LIB_DIR
 
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
