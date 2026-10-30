@@ -77,6 +77,11 @@ for root, dirs, files in os.walk(repo_root):
         for section in ("dependencies", "devDependencies"):
             if section in pkg:
                 new_section = replace_catalog(pkg[section])
+                # Drop @types/bun from dependencies: catalog version 1.4.3
+                # causes bun to try git clone which fails in CI.
+                if "@types/bun" in new_section:
+                    del new_section["@types/bun"]
+                    modified = True
                 if new_section != pkg[section]:
                     pkg[section] = new_section
                     modified = True
