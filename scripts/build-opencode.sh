@@ -43,15 +43,17 @@ fi
 # needing catalog support (which bun 1.2.13 may lack).
 OPENCODE_PKG_JSON="$OPENCODE_SRC_ABS/package.json"
 if [ -f "$OPENCODE_PKG_JSON" ]; then
-    echo ">>> Patching catalog: references in package.json..."
-    python3 - "$OPENCODE_PKG_JSON" <<'PYEOF'
-import json, sys
+    echo ">>> Patching catalog: references in package.json files..."
+    python3 - "$OPENCODE_SRC_ABS" <<'PYEOF'
+import json, sys, os
 
-path = sys.argv[1]
-with open(path) as f:
-    pkg = json.load(f)
+repo_root = sys.argv[1]
 
-catalog = pkg.get("workspaces", {}).get("catalog", {})
+# Read root package.json to get the catalog
+root_pkg_path = os.path.join(repo_root, "package.json")
+with open(root_pkg_path) as f:
+    root_pkg = json.load(f)
+catalog = root_pkg.get("workspaces", {}).get("catalog", {})
 
 def replace_catalog(obj):
     if isinstance(obj, dict):
@@ -60,13 +62,29 @@ def replace_catalog(obj):
         return [replace_catalog(v) for v in obj]
     return obj
 
-for section in ("dependencies", "devDependencies", "overrides"):
-    if section in pkg:
-        pkg[section] = replace_catalog(pkg[section])
-
-with open(path, "w") as f:
-    json.dump(pkg, f, indent=2)
-    f.write("\n")
+# Find and patch all package.json files under the repo root
+for root, dirs, files in os.walk(repo_root):
+    # Skip node_modules directories
+    dirs[:] = [d for d in dirs if d != "node_modules"]
+    if "package.json" in files:
+        pkg_path = os.path.join(root, "package.json")
+        try:
+            with open(pkg_path) as f:
+                pkg = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            continue
+        modified = False
+        for section in ("dependencies", "devDependencies", "overrides"):
+            if section in pkg:
+                new_section = replace_catalog(pkg[section])
+                if new_section != pkg[section]:
+                    pkg[section] = new_section
+                    modified = True
+        if modified:
+            with open(pkg_path, "w") as f:
+                json.dump(pkg, f, indent=2)
+                f.write("\n")
+            print(f"Patched {pkg_path}")
 
 print("Catalog references patched.")
 PYEOF
