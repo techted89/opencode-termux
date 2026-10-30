@@ -33,17 +33,12 @@ HOST_BUN="${HOST_BUN:-bun}"
 # catalog: references properly. Use bun 1.4.4 for the install step only
 # (it doesn't produce module graphs). The build step continues to use
 # HOST_BUN (1.2.13) for module graph compatibility with target bun.
-INSTALL_BUN_DIR="${REPO_ROOT_ABS}/.bun-install/bun-v1.4.4"
-INSTALL_BUN="${INSTALL_BUN_DIR}/bun"
+INSTALL_BUN_DIR="${REPO_ROOT_ABS}/.bun-install"
+INSTALL_BUN="${INSTALL_BUN_DIR}/bin/bun-v1.4.4"
 if [ ! -x "$INSTALL_BUN" ]; then
-    echo ">>> Downloading bun v1.4.4 for OpenCode dependency installation..."
-    mkdir -p "$INSTALL_BUN_DIR"
-    curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip" -o "${REPO_ROOT_ABS}/.bun-install/bun.zip"
-    unzip -o -q "${REPO_ROOT_ABS}/.bun-install/bun.zip" -d "$INSTALL_BUN_DIR"
-    rm -f "${REPO_ROOT_ABS}/.bun-install/bun.zip"
-    chmod +x "$INSTALL_BUN"
+    echo ">>> Installing bun v1.4.4 for OpenCode dependency installation..."
+    BUN_INSTALL="$INSTALL_BUN_DIR" curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
 fi
-export PATH="${INSTALL_BUN_DIR}:$PATH"
 
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
 
