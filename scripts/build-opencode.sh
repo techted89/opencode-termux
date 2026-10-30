@@ -74,12 +74,28 @@ for root, dirs, files in os.walk(repo_root):
         except (json.JSONDecodeError, IOError):
             continue
         modified = False
-        for section in ("dependencies", "devDependencies", "overrides"):
+        for section in ("dependencies", "devDependencies"):
             if section in pkg:
                 new_section = replace_catalog(pkg[section])
                 if new_section != pkg[section]:
                     pkg[section] = new_section
                     modified = True
+        # For overrides, replace "catalog:" with catalog version if available,
+        # otherwise drop the entry (overrides with unresolvable versions cause
+        # bun to try git clone which fails in CI).
+        if "overrides" in pkg:
+            new_overrides = {}
+            for k, v in pkg["overrides"].items():
+                if isinstance(v, str) and v == "catalog:":
+                    if k in catalog:
+                        new_overrides[k] = catalog[k]
+                        modified = True
+                    # else: drop the override entry
+                else:
+                    new_overrides[k] = replace_catalog(v)
+            if new_overrides != pkg["overrides"]:
+                pkg["overrides"] = new_overrides
+                modified = True
         if modified:
             with open(pkg_path, "w") as f:
                 json.dump(pkg, f, indent=2)
