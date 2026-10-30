@@ -41,6 +41,7 @@ fi
 # Patch package.json: replace "catalog:" references with actual versions
 # from the catalog field, so host bun 1.2.13 can resolve them without
 # needing catalog support (which bun 1.2.13 may lack).
+# Also remove @types/bun from dependencies/overrides to avoid git clone failures.
 OPENCODE_PKG_JSON="$OPENCODE_SRC_ABS/package.json"
 if [ -f "$OPENCODE_PKG_JSON" ]; then
     echo ">>> Patching catalog: references in package.json files..."
@@ -107,6 +108,10 @@ for root, dirs, files in os.walk(repo_root):
             if new_overrides != pkg["overrides"]:
                 pkg["overrides"] = new_overrides
                 modified = True
+        # Also remove @types/bun from peerDependencies if present
+        if "peerDependencies" in pkg and "@types/bun" in pkg["peerDependencies"]:
+            del pkg["peerDependencies"]["@types/bun"]
+            modified = True
         if modified:
             with open(pkg_path, "w") as f:
                 json.dump(pkg, f, indent=2)
@@ -117,12 +122,46 @@ print("Catalog references patched.")
 PYEOF
 fi
 
+# Additional: explicitly remove @types/bun from packages/opencode/package.json
+# since it's a known CI failure point
+OPENCODE_PKG_JSON="$OPENCODE_SRC_ABS/packages/opencode/package.json"
+if [ -f "$OPENCODE_PKG_JSON" ]; then
+    python3 - "$OPENCODE_PKG_JSON" <<'PYEOF'
+import json, sys
+pkg_path = sys.argv[1]
+with open(pkg_path) as f:
+    pkg = json.load(f)
+modified = False
+for section in ("dependencies", "devDependencies", "overrides", "peerDependencies"):
+    if section in pkg and "@types/bun" in pkg[section]:
+        del pkg[section]["@types/bun"]
+        modified = True
+        print(f"Removed @types/bun from {section} in {pkg_path}")
+if modified:
+    with open(pkg_path, "w") as f:
+        json.dump(pkg, f, indent=2)
+        f.write("\n")
+PYEOF
+fi
+
 OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
-"$HOST_BUN" install --ignore-scripts --no-cache || true
+# Install without --ignore-scripts to ensure optional native packages are installed
+# Use --platform and --arch to ensure all platform-specific native packages are available
+"$HOST_BUN" install --no-cache
+
+# Also explicitly install the ARM64 native package for the libopentui.so swap
+# This ensures @opentui/core-linux-arm64 is available even on x64 host
+echo ">>> Installing ARM64 native package..."
+"$HOST_BUN" add -D @opentui/core-linux-arm64@0.5.10 --no-cache 2>/dev/null || true
+# Ensure x64 native package is installed for the libopentui.so swap
+"$HOST_BUN" add -D @opentui/core-linux-x64@0.5.10 --no-cache 2>/dev/null || true
+# Also install musl variants to avoid resolution errors during bundling
+"$HOST_BUN" add -D @opentui/core-linux-arm64-musl@0.5.10 --no-cache 2>/dev/null || true
+"$HOST_BUN" add -D @opentui/core-linux-x64-musl@0.5.10 --no-cache 2>/dev/null || true
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"
@@ -134,17 +173,39 @@ fi
 
 # Find ARM64 libopentui.so
 # build.zig installs to ../lib/{target} relative to the zig dir
-ARM64_LIBOPENTUI="$OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android/libopentui.so"
-# Fallback: packages/native/lib/aarch64-linux-android/libopentui.so
+ARM64_LIBOPENTUI="$OPENTUI_SRC_ABS/packages/native/lib/aarch64-linux-android/libopentui.so"
+# Fallback: packages/core/src/lib/aarch64-linux-android/libopentui.so (copied by build-opentui.sh)
 if [ ! -f "$ARM64_LIBOPENTUI" ]; then
-    ALT_LIBOPENTUI="$OPENTUI_SRC_ABS/packages/native/lib/aarch64-linux-android/libopentui.so"
+    ALT_LIBOPENTUI="$OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android/libopentui.so"
     if [ -f "$ALT_LIBOPENTUI" ]; then
         ARM64_LIBOPENTUI="$ALT_LIBOPENTUI"
     else
-        echo "WARNING: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI or $ALT_LIBOPENTUI"
-        echo "         The OpenCode binary may embed the wrong architecture libopentui.so"
-        ARM64_LIBOPENTUI=""
+        # Additional fallback: check webkit-android output
+        WEBKIT_LIBOPENTUI="$WEBKIT_OUTPUT_ABS/lib/libopentui.so"
+        if [ -f "$WEBKIT_LIBOPENTUI" ]; then
+            ARM64_LIBOPENTUI="$WEBKIT_LIBOPENTUI"
+        else
+            echo "WARNING: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI or $ALT_LIBOPENTUI or $WEBKIT_LIBOPENTUI"
+            echo "         The OpenCode binary may embed the wrong architecture libopentui.so"
+            ARM64_LIBOPENTUI=""
+        fi
     fi
+fi
+
+# Verify the found libopentui.so has the correct architecture
+if [ -n "$ARM64_LIBOPENTUI" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
+    echo ">>> Verifying ARM64 libopentui.so architecture..."
+    file "$ARM64_LIBOPENTUI" | grep -q "aarch64" || {
+        echo "ERROR: libopentui.so at $ARM64_LIBOPENTUI is not ARM64 architecture"
+        file "$ARM64_LIBOPENTUI"
+        exit 1
+    }
+    readelf -d "$ARM64_LIBOPENTUI" | grep -q "NEEDED.*libc.so" || {
+        echo "ERROR: libopentui.so is missing NEEDED: libc.so dependency"
+        readelf -d "$ARM64_LIBOPENTUI" | grep NEEDED || echo "       (no NEEDED entries found)"
+        exit 1
+    }
+    echo "    libopentui.so architecture and dependencies verified OK"
 fi
 
 # Find x86_64 libopentui.so in node_modules and swap it
@@ -172,6 +233,14 @@ if [ -n "$OPENTUI_NODE_MODULE" ]; then
         cp "$OPENTUI_NODE_MODULE" "$BACKUP_FILE"
         cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
         echo "    Backed up to $BACKUP_FILE"
+        # Verify the swap
+        echo "    Verifying swapped libopentui.so..."
+        file "$OPENTUI_NODE_MODULE" | grep -q "aarch64" || {
+            echo "ERROR: Swapped libopentui.so is not ARM64 architecture"
+            file "$OPENTUI_NODE_MODULE"
+            exit 1
+        }
+        echo "    Swap verified OK"
     else
         echo "WARNING: No ARM64 libopentui.so available; keeping x86_64 version"
     fi

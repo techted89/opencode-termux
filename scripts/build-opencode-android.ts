@@ -120,6 +120,7 @@ try {
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
 const workerPath = "./src/cli/cmd/tui/worker.ts"
+const workerAbsPath = path.resolve(OPENCODE_DIR, "src/cli/cmd/tui/worker.ts")
 
 const bunfsRoot = "/$bunfs/root/"
 const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
@@ -145,12 +146,12 @@ const result = await Bun.build({
     outfile: hostBinaryPath,
     execArgv: [`--user-agent=opencode/${VERSION}`, "--use-system-ca", "--"],
   },
-  entrypoints: ["./src/index.ts", parserWorkerResolved, workerPath],
+  entrypoints: ["./src/index.ts", parserWorkerResolved, workerAbsPath],
   define: {
     OPENCODE_VERSION: `'${VERSION}'`,
     OPENCODE_MIGRATIONS: JSON.stringify(migrations),
     OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
-    OPENCODE_WORKER_PATH: workerPath,
+    OPENCODE_WORKER_PATH: "./src/cli/cmd/tui/worker.ts",
     OPENCODE_CHANNEL: `'${CHANNEL}'`,
     OPENCODE_LIBC: "",
   },

@@ -138,6 +138,22 @@ jobs:
           echo "Host Bun version: $(bun --version)"
           echo "Target Bun version: $BUN_VERSION"
 
+      - name: Pre-install @types/bun and native packages to avoid git clone in CI
+        run: |
+          # Install @types/bun globally so it doesn't try to git clone during bun install
+          bun add -g @types/bun@1.2.13
+          # Pre-install ARM64 native packages that are needed for the libopentui.so swap
+          # These are not in the catalog and must be explicitly installed
+          bun add -g @opentui/core-linux-arm64@0.5.10 --no-cache 2>/dev/null || true
+          bun add -g @opentui/core-linux-x64@0.5.10 --no-cache 2>/dev/null || true
+
+      - name: Verify Bun, @types/bun and native packages
+        run: |
+          echo "Host Bun: $(bun --version)"
+          echo "@types/bun available: $(bun pm ls -g | grep @types/bun || echo 'not found')"
+          echo "Native packages:"
+          bun pm ls -g | grep @opentui || echo "  (no @opentui packages found globally)"
+
       # =============================================
       # Cache expensive build artifacts
       # =============================================
@@ -228,6 +244,35 @@ jobs:
           ls -lh "$BUN_BINARY"
           file "$BUN_BINARY"
           readelf -h "$BUN_BINARY" | grep -E "Machine|Class"
+          # Verify it's ARM64
+          if ! file "$BUN_BINARY" | grep -q "aarch64"; then
+            echo "ERROR: Bun binary is not ARM64 architecture"
+            exit 1
+          fi
+
+      # =============================================
+      # Verify native packages are available
+      # =============================================
+      - name: Verify native packages
+        run: |
+          echo "=== Verifying native packages ==="
+          source scripts/env.sh
+          cd "${OPENCODE_SRC}"
+          echo "Checking @opentui/core-linux-arm64..."
+          if [ -d "node_modules/@opentui/core-linux-arm64" ]; then
+            ls -la node_modules/@opentui/core-linux-arm64/
+            if [ -f "node_modules/@opentui/core-linux-arm64/libopentui.so" ]; then
+              file node_modules/@opentui/core-linux-arm64/libopentui.so | grep aarch64 && echo "ARM64 libopentui.so OK" || echo "WARNING: not ARM64"
+            fi
+          else
+            echo "WARNING: @opentui/core-linux-arm64 not found in node_modules"
+          fi
+          echo "Checking @opentui/core-linux-x64..."
+          if [ -d "node_modules/@opentui/core-linux-x64" ]; then
+            ls -la node_modules/@opentui/core-linux-x64/
+          else
+            echo "WARNING: @opentui/core-linux-x64 not found in node_modules"
+          fi
 
       # =============================================
       # Build libopentui.so
@@ -236,6 +281,28 @@ jobs:
         run: |
           source scripts/env.sh
           ./scripts/build-opentui.sh
+
+      - name: Verify libopentui.so
+        run: |
+          source scripts/env.sh
+          LIBOPENTUI="${OPENTUI_SRC}/packages/native/lib/aarch64-linux-android/libopentui.so"
+          if [ -f "$LIBOPENTUI" ]; then
+            echo "Found libopentui.so at $LIBOPENTUI"
+            file "$LIBOPENTUI"
+            readelf -d "$LIBOPENTUI" | grep NEEDED
+          else
+            echo "ERROR: libopentui.so not found at $LIBOPENTUI"
+            echo "Checking alternative location..."
+            ALT_LIBOPENTUI="${OPENTUI_SRC}/packages/core/src/lib/aarch64-linux-android/libopentui.so"
+            if [ -f "$ALT_LIBOPENTUI" ]; then
+              echo "Found at alternative location: $ALT_LIBOPENTUI"
+              file "$ALT_LIBOPENTUI"
+              readelf -d "$ALT_LIBOPENTUI" | grep NEEDED
+            else
+              find "${OPENTUI_SRC}" -name "libopentui.so" -type f 2>/dev/null
+              exit 1
+            fi
+          fi
 
       # =============================================
       # Build OpenCode standalone binary

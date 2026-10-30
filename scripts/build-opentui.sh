@@ -133,6 +133,33 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     rm -rf "$WORK_DIR_ABS/ghostty-staging" "$WORK_DIR_ABS/ghostty.tar.gz" "$WORK_DIR_ABS/ghostty-shared-deps.patch"
 fi
 
+# Ensure uucode-ghostty directory exists (from reference guide)
+mkdir -p "$OPENTUI_ZIG_DEPS/uucode-ghostty"
+
+# Patch ghostty build.zig.zon for zlib dependency (from reference guide)
+GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
+if [ -f "$GHOSTTY_ZON" ]; then
+    if ! grep -q "zlib" "$GHOSTTY_ZON"; then
+        echo ">>> Patching ghostty build.zig.zon for zlib..."
+        python3 - "$GHOSTTY_ZON" <<'PYEOF'
+import sys
+zon_path = sys.argv[1]
+with open(zon_path, "r") as f:
+    content = f.read()
+zlib_dep = """
+    .zlib = .{
+        .url = "https://github.com/madler/zlib/tarball/v1.3.1",
+        .hash = "12209d76f09e5772392437637841f48680199e843bcbc50bcf5123d463d1a19615a1",
+    },
+"""
+content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)
+with open(zon_path, "w") as f:
+    f.write(content)
+print("Patched ghostty build.zig.zon with zlib dependency")
+PYEOF
+    fi
+fi
+
 # Create merged bionic sysroot with shimmed C headers (required by the
 # android patch's bionicSysrootInclude() for miniaudio/yoga translate-c)
 echo ">>> Preparing bionic sysroot at $BIONIC_SYSROOT_INC..."
@@ -172,21 +199,36 @@ export ANDROID_NDK_HOME BIONIC_SYSROOT_INC ZIG_LIBC ANDROID_NDK_LIB_DIR
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
 
+# Clean any previous build artifacts for this target
+rm -rf "$OPENTUI_ZIG_DIR/lib/aarch64-linux-android"
+
 "$ZIG_BIN_ABS" build \
     -Dlibrary-target=aarch64-linux-android \
     -Doptimize=ReleaseSafe \
+    -Dstrip=true \
     2>&1
 
 # The build installs shared library to ../lib/{output_name} relative to
 # packages/native, i.e. packages/native/lib/aarch64-linux-android/libopentui.so
 LIBOPENTUI="$OPENTUI_ZIG_DIR/lib/aarch64-linux-android/libopentui.so"
 if [ ! -f "$LIBOPENTUI" ]; then
+    # Try alternative location
+    LIBOPENTUI="$OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android/libopentui.so"
+fi
+if [ ! -f "$LIBOPENTUI" ]; then
     echo "ERROR: libopentui.so not found"
-    echo "  Expected at: $LIBOPENTUI"
+    echo "  Expected at: $OPENTUI_ZIG_DIR/lib/aarch64-linux-android/libopentui.so"
+    echo "  Or at: $OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android/libopentui.so"
     echo "  Searching for any libopentui.so under opentui-src..."
     find "$OPENTUI_SRC_ABS" -name "libopentui.so" -type f 2>/dev/null || true
+    echo "  Zig build output directory contents:"
+    ls -la "$OPENTUI_ZIG_DIR/lib/" 2>/dev/null || echo "  lib directory does not exist"
     exit 1
 fi
+
+# Also copy to the core package lib directory where build-opencode.sh looks
+mkdir -p "$OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android"
+cp "$LIBOPENTUI" "$OPENTUI_SRC_ABS/packages/core/src/lib/aarch64-linux-android/libopentui.so"
 
 # Copy into webkit-android output (where Bun's CMake expects it via SetupWebKit.cmake)
 WEBKIT_OUTPUT_ABS="${REPO_ROOT_ABS}/${WEBKIT_OUTPUT#./}"
