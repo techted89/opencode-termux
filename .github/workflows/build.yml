@@ -14,6 +14,7 @@ on:
 env:
   BUN_VERSION: "1.2.13"
   OPENCODE_VERSION: "1.19.4"
+  OPENTUI_VERSION: "0.5.10"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
@@ -29,7 +30,6 @@ jobs:
   build:
     name: Build Android aarch64
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 360  # 6 hours for full build
 
     steps:
@@ -163,9 +163,11 @@ jobs:
           BUN_PATCH_HASH=$(sha256sum patches/bun/android-support.patch | cut -c1-16)
           WEBKIT_PATCH_HASH=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)
           ZIG_PATCH_HASH=$(sha256sum patches/zig/posix-android-sigaction.patch | cut -c1-16)
+          OPENTUI_PATCH_HASH=$(sha256sum patches/opentui/v2-0.5.10-android.patch | cut -c1-16)
           echo "bun_patch_hash=$BUN_PATCH_HASH" >> $GITHUB_OUTPUT
           echo "webkit_patch_hash=$WEBKIT_PATCH_HASH" >> $GITHUB_OUTPUT
           echo "zig_patch_hash=$ZIG_PATCH_HASH" >> $GITHUB_OUTPUT
+          echo "opentui_patch_hash=$OPENTUI_PATCH_HASH" >> $GITHUB_OUTPUT
 
       - name: Cache ICU build
         id: cache-icu
@@ -187,6 +189,22 @@ jobs:
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
           key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+
+      - name: Cache libopentui.so
+        id: cache-opentui
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so
+          key: opentui-android-${{ env.OPENTUI_VERSION }}-${{ steps.hashes.outputs.opentui_patch_hash }}-${{ env.ZIG_VERSION }}
+
+      - name: Cache OpenCode node_modules
+        id: cache-opencode-deps
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/opencode-src/node_modules
+          key: opencode-deps-${{ env.OPENCODE_VERSION }}-${{ hashFiles('${{ env.WORK_DIR }}/opencode-src/package.json') }}-${{ env.BUN_VERSION }}
+          restore-keys: |
+            opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-
 
       # =============================================
       # Clone and patch sources
@@ -251,33 +269,10 @@ jobs:
           fi
 
       # =============================================
-      # Verify native packages are available
-      # =============================================
-      - name: Verify native packages
-        run: |
-          echo "=== Verifying native packages ==="
-          source scripts/env.sh
-          cd "${OPENCODE_SRC}"
-          echo "Checking @opentui/core-linux-arm64..."
-          if [ -d "node_modules/@opentui/core-linux-arm64" ]; then
-            ls -la node_modules/@opentui/core-linux-arm64/
-            if [ -f "node_modules/@opentui/core-linux-arm64/libopentui.so" ]; then
-              file node_modules/@opentui/core-linux-arm64/libopentui.so | grep aarch64 && echo "ARM64 libopentui.so OK" || echo "WARNING: not ARM64"
-            fi
-          else
-            echo "WARNING: @opentui/core-linux-arm64 not found in node_modules"
-          fi
-          echo "Checking @opentui/core-linux-x64..."
-          if [ -d "node_modules/@opentui/core-linux-x64" ]; then
-            ls -la node_modules/@opentui/core-linux-x64/
-          else
-            echo "WARNING: @opentui/core-linux-x64 not found in node_modules"
-          fi
-
-      # =============================================
       # Build libopentui.so
       # =============================================
       - name: Build libopentui.so
+        if: steps.cache-opentui.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh
           ./scripts/build-opentui.sh
@@ -308,9 +303,34 @@ jobs:
       # Build OpenCode standalone binary
       # =============================================
       - name: Build OpenCode standalone binary
+        if: steps.cache-opencode-deps.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh
           ./scripts/build-opencode.sh
+
+      # =============================================
+      # Verify native packages (after OpenCode is built/installed)
+      # =============================================
+      - name: Verify native packages
+        run: |
+          echo "=== Verifying native packages ==="
+          source scripts/env.sh
+          cd "${OPENCODE_SRC}"
+          echo "Checking @opentui/core-linux-arm64..."
+          if [ -d "node_modules/@opentui/core-linux-arm64" ]; then
+            ls -la node_modules/@opentui/core-linux-arm64/
+            if [ -f "node_modules/@opentui/core-linux-arm64/libopentui.so" ]; then
+              file node_modules/@opentui/core-linux-arm64/libopentui.so | grep aarch64 && echo "ARM64 libopentui.so OK" || echo "WARNING: not ARM64"
+            fi
+          else
+            echo "WARNING: @opentui/core-linux-arm64 not found in node_modules"
+          fi
+          echo "Checking @opentui/core-linux-x64..."
+          if [ -d "node_modules/@opentui/core-linux-x64" ]; then
+            ls -la node_modules/@opentui/core-linux-x64/
+          else
+            echo "WARNING: @opentui/core-linux-x64 not found in node_modules"
+          fi
 
       - name: Verify OpenCode binary
         run: |
