@@ -28,6 +28,23 @@ DIST_DIR_ABS="${REPO_ROOT_ABS}/${DIST_DIR#./}"
 
 HOST_BUN="${HOST_BUN:-bun}"
 
+# OpenCode v1.19.4's package.json specifies "packageManager": "bun@1.4.4"
+# and uses catalog: references extensively. Host bun 1.2.13 cannot resolve
+# catalog: references properly. Use bun 1.4.4 for the install step only
+# (it doesn't produce module graphs). The build step continues to use
+# HOST_BUN (1.2.13) for module graph compatibility with target bun.
+INSTALL_BUN_DIR="${REPO_ROOT_ABS}/.bun-install/bun-v1.4.4"
+INSTALL_BUN="${INSTALL_BUN_DIR}/bun"
+if [ ! -x "$INSTALL_BUN" ]; then
+    echo ">>> Downloading bun v1.4.4 for OpenCode dependency installation..."
+    mkdir -p "$INSTALL_BUN_DIR"
+    curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip" -o "${REPO_ROOT_ABS}/.bun-install/bun.zip"
+    unzip -o -q "${REPO_ROOT_ABS}/.bun-install/bun.zip" -d "$INSTALL_BUN_DIR"
+    rm -f "${REPO_ROOT_ABS}/.bun-install/bun.zip"
+    chmod +x "$INSTALL_BUN"
+fi
+export PATH="${INSTALL_BUN_DIR}:$PATH"
+
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
 
 # Clone OpenCode if needed
@@ -43,7 +60,7 @@ OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
-"$HOST_BUN" install --ignore-scripts --no-cache
+"$INSTALL_BUN" install --ignore-scripts --no-cache
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"
