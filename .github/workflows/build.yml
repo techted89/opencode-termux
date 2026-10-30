@@ -240,10 +240,9 @@ jobs:
       # Build OpenCode standalone binary
       # =============================================
       - name: Build OpenCode standalone binary
-        continue-on-error: true
         run: |
           source scripts/env.sh
-          ./scripts/build-opencode.sh || true
+          ./scripts/build-opencode.sh
 
       - name: Verify OpenCode binary
         run: |
