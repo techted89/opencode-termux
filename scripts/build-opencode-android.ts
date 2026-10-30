@@ -133,7 +133,7 @@ const hostBinaryPath = path.join(OUTPUT_DIR, "opencode-host")
 
 console.log("Building standalone binary for host platform...")
 const result = await Bun.build({
-  conditions: ["browser"],
+  conditions: ["bun"],
   tsconfig: "./tsconfig.json",
   plugins: [plugin],
   compile: {
