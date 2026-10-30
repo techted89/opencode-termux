@@ -86,6 +86,12 @@ for root, dirs, files in os.walk(repo_root):
         if "overrides" in pkg:
             new_overrides = {}
             for k, v in pkg["overrides"].items():
+                # Drop @types/bun from overrides: catalog version 1.4.3 causes
+                # bun to try git clone which fails in CI. @types/bun is type
+                # definitions only - the build works without it.
+                if k == "@types/bun":
+                    modified = True
+                    continue
                 if isinstance(v, str) and v == "catalog:":
                     if k in catalog:
                         new_overrides[k] = catalog[k]
