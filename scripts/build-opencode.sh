@@ -28,18 +28,6 @@ DIST_DIR_ABS="${REPO_ROOT_ABS}/${DIST_DIR#./}"
 
 HOST_BUN="${HOST_BUN:-bun}"
 
-# OpenCode v1.19.4's package.json specifies "packageManager": "bun@1.4.4"
-# and uses catalog: references extensively. Host bun 1.2.13 cannot resolve
-# catalog: references properly. Use bun 1.4.4 for the install step only
-# (it doesn't produce module graphs). The build step continues to use
-# HOST_BUN (1.2.13) for module graph compatibility with target bun.
-INSTALL_BUN_DIR="${REPO_ROOT_ABS}/.bun-install"
-INSTALL_BUN="${INSTALL_BUN_DIR}/bin/bun-v1.4.4"
-if [ ! -x "$INSTALL_BUN" ]; then
-    echo ">>> Installing bun v1.4.4 for OpenCode dependency installation..."
-    BUN_INSTALL="$INSTALL_BUN_DIR" curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
-fi
-
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
 
 # Clone OpenCode if needed
@@ -50,12 +38,46 @@ else
     echo ">>> OpenCode source exists at $OPENCODE_SRC_ABS"
 fi
 
+# Patch package.json: replace "catalog:" references with actual versions
+# from the catalog field, so host bun 1.2.13 can resolve them without
+# needing catalog support (which bun 1.2.13 may lack).
+OPENCODE_PKG_JSON="$OPENCODE_SRC_ABS/package.json"
+if [ -f "$OPENCODE_PKG_JSON" ]; then
+    echo ">>> Patching catalog: references in package.json..."
+    python3 - "$OPENCODE_PKG_JSON" <<'PYEOF'
+import json, sys
+
+path = sys.argv[1]
+with open(path) as f:
+    pkg = json.load(f)
+
+catalog = pkg.get("workspaces", {}).get("catalog", {})
+
+def replace_catalog(obj):
+    if isinstance(obj, dict):
+        return {k: (catalog.get(v, v) if isinstance(v, str) and v == "catalog:" else replace_catalog(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [replace_catalog(v) for v in obj]
+    return obj
+
+for section in ("dependencies", "devDependencies", "overrides"):
+    if section in pkg:
+        pkg[section] = replace_catalog(pkg[section])
+
+with open(path, "w") as f:
+    json.dump(pkg, f, indent=2)
+    f.write("\n")
+
+print("Catalog references patched.")
+PYEOF
+fi
+
 OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
-"$INSTALL_BUN" install --ignore-scripts --no-cache
+"$HOST_BUN" install --ignore-scripts --no-cache
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"
