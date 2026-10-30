@@ -43,7 +43,7 @@ OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
-"$HOST_BUN" install
+"$HOST_BUN" install --ignore-scripts
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"
