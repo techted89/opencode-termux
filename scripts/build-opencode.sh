@@ -55,7 +55,7 @@ catalog = pkg.get("workspaces", {}).get("catalog", {})
 
 def replace_catalog(obj):
     if isinstance(obj, dict):
-        return {k: (catalog.get(v, v) if isinstance(v, str) and v == "catalog:" else replace_catalog(v)) for k, v in obj.items()}
+        return {k: (catalog.get(k, v) if isinstance(v, str) and v == "catalog:" else replace_catalog(v)) for k, v in obj.items()}
     if isinstance(obj, list):
         return [replace_catalog(v) for v in obj]
     return obj
