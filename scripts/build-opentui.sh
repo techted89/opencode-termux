@@ -122,6 +122,66 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-ghostty" ]; then
     rm -f "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
 fi
 
+# Create build.zig for uucode-ghostty if it doesn't exist
+UUCOD_GHOSTTY_BUILD="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig"
+if [ ! -f "$UUCOD_GHOSTTY_BUILD" ]; then
+    echo ">>> Creating build.zig for uucode-ghostty..."
+    cat > "$UUCOD_GHOSTTY_BUILD" <<'EOF'
+const std = @import("std");
+
+pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{}).target;
+    const optimize = b.standardOptimizeOption(.{});
+
+    const lib = b.addSharedLibrary(.{
+        .name = "uucode",
+        .version = "0.1.0",
+        .root_source_file = .{ .path = "src/root.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Export tables.zig as a lazy path for ghostty
+    # Create build.zig for uucode-ghostty if it doesn't exist
+UUCOD_GHOSTTY_BUILD="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig"
+if [ ! -f "$UUCOD_GHOSTTY_BUILD" ]; then
+    echo ">>> Creating build.zig for uucode-ghostty..."
+    cat > "$UUCOD_GHOSTTY_BUILD" <<'EOF'
+const std = @import("std");
+
+pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{}).target;
+    const optimize = b.standardOptimizeOption(.{});
+
+    const lib = b.addSharedLibrary(.{
+        .name = "uucode",
+        .version = "0.1.0",
+        .root_source_file = .{ .path = "src/root.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Export tables.zig as a lazy path for ghostty
+    const tables_path = b.path("src/tables.zig");
+    b.installLazyPath("tables.zig", tables_path);
+}
+EOF
+fi
+
+# Create build.zig.zon for uucode-ghostty if it doesn't exist
+UUCOD_GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig.zon"
+if [ ! -f "$UUCOD_GHOSTTY_ZON" ]; then
+    echo ">>> Creating build.zig.zon for uucode-ghostty..."
+    cat > "$UUCOD_GHOSTTY_ZON" <<'EOF'
+.{
+    .name = "uucode",
+    .version = "0.1.0",
+    .paths = .{"src"},
+    .dependencies = .{},
+}
+EOF
+fi
+
 if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     echo ">>> Downloading ghostty zig dependency..."
     curl -fsSL "https://github.com/ghostty-org/ghostty/archive/aeda37b305ee3d897ff1bfeddfe39d7fa9366a74.tar.gz" -o "$WORK_DIR_ABS/ghostty.tar.gz"
