@@ -158,7 +158,7 @@ with open(zon_path, "r") as f:
 zlib_dep = """
     .zlib = .{
         .url = "https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz",
-        .hash = "ciqbp2eimpzwabtsvnerqlzboka3n7cnhr3cxxrwde26invjkiknaxa",
+        .hash = "122017e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c",
     },
 """
 content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)
