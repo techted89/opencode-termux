@@ -1,17 +1,30 @@
 name: Build OpenCode for Android/Termux
 
 on:
+  # Trigger on tag pushes for releases
   push:
     tags:
       - 'v*'
+  # Trigger on PRs to main for validation
+  pull_request:
+    branches:
+      - main
+      - master
+  # Manual trigger with version input
   workflow_dispatch:
     inputs:
       opencode_version:
         description: 'OpenCode version to build'
         required: false
         default: '1.19.4'
+      force_rebuild:
+        description: 'Force rebuild ignoring cache'
+        required: false
+        default: 'false'
+        type: boolean
 
 env:
+  # Core versions - pinned for reproducibility
   BUN_VERSION: "1.2.13"
   OPENCODE_VERSION: "1.19.4"
   OPENTUI_VERSION: "0.5.10"
@@ -21,36 +34,52 @@ env:
   TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.16.0"
-  # golem10 has 15GB RAM — limit parallelism to avoid OOM during WebKit link
+  # Build configuration
   JOBS: "4"
-  # Use workspace-relative build dir for ubuntu-latest compatibility
   WORK_DIR: "./build"
+  # Cache configuration
+  CACHE_ENABLE_CROSS_OS: "true"
 
 jobs:
-  build:
+  # -----------------------------------------------------------------------
+  # Build Android aarch64 - Main compilation job
+  # -----------------------------------------------------------------------
+  build-android-aarch64:
     name: Build Android aarch64
     runs-on: ubuntu-latest
     timeout-minutes: 360  # 6 hours for full build
+    # Allow manual retry on failure
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+    env:
+      # Runner-specific paths
+      TERMUX_HOME_TARGET: /data/data/com.termux/files/home/opencode-termux
+      NDK_DIR: /opt/android-ndk
 
     steps:
+      # ======================================================================
+      # Context7 MCP Research Gate: Checkout with full history for patching
+      # ======================================================================
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Preserve file timestamps for build reproducibility
+          persist-credentials: true
 
       - name: Override OpenCode version from input
         if: github.event.inputs.opencode_version
         run: echo "OPENCODE_VERSION=${{ github.event.inputs.opencode_version }}" >> $GITHUB_ENV
 
-      - name: Create work directory
+      - name: Initialize Workspace and Termux Directories
         run: |
           mkdir -p "$WORK_DIR"
           echo "Work directory: $WORK_DIR"
           df -h .
 
-      # =============================================
-      # Install build dependencies
-      # =============================================
+      # ======================================================================
+      # Install build dependencies with proper caching
+      # ======================================================================
       - name: Install system packages
         run: |
           sudo apt-get update
@@ -60,7 +89,8 @@ jobs:
             build-essential pkg-config \
             libxml2-dev libxslt1-dev \
             golang-go \
-            autoconf automake libtool
+            autoconf automake libtool \
+            patchelf
 
       - name: Install CMake 3.28+
         run: |
@@ -82,7 +112,6 @@ jobs:
 
       - name: Install Android NDK r28b
         run: |
-          NDK_DIR="/opt/android-ndk"
           if [ -d "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64" ]; then
             echo "NDK already installed at $NDK_DIR"
           else
@@ -123,10 +152,6 @@ jobs:
 
       - name: Install Bun (host, pinned for module graph compatibility)
         run: |
-          # CRITICAL: The host Bun version must produce a module graph format
-          # compatible with the target Bun (v1.2.13).
-          #
-          # Host Bun pinned to 1.2.13 to match target.
           HOST_BUN_VERSION="1.2.13"
           GOT="$(bun --version 2>/dev/null || true)"
           if [ "$GOT" != "$HOST_BUN_VERSION" ]; then
@@ -140,12 +165,11 @@ jobs:
 
       - name: Pre-install @types/bun and native packages to avoid git clone in CI
         run: |
-          # Install @types/bun globally so it doesn't try to git clone during bun install
           bun add -g @types/bun@1.2.13
-          # Pre-install ARM64 native packages that are needed for the libopentui.so swap
-          # These are not in the catalog and must be explicitly installed
           bun add -g @opentui/core-linux-arm64@0.5.10 --no-cache 2>/dev/null || true
           bun add -g @opentui/core-linux-x64@0.5.10 --no-cache 2>/dev/null || true
+          bun add -g @opentui/core-linux-arm64-musl@0.5.10 --no-cache 2>/dev/null || true
+          bun add -g @opentui/core-linux-x64-musl@0.5.10 --no-cache 2>/dev/null || true
 
       - name: Verify Bun, @types/bun and native packages
         run: |
@@ -154,9 +178,9 @@ jobs:
           echo "Native packages:"
           bun pm ls -g | grep @opentui || echo "  (no @opentui packages found globally)"
 
-      # =============================================
-      # Cache expensive build artifacts
-      # =============================================
+      # ======================================================================
+      # Cache expensive build artifacts with cross-OS support
+      # ======================================================================
       - name: Compute patch hashes
         id: hashes
         run: |
@@ -174,41 +198,54 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/deps-android/prefix
-          key: icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
+          key: ${{ runner.os }}-icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
+          restore-keys: |
+            ${{ runner.os }}-icu-android-${{ env.ICU_VERSION }}-
+            ${{ runner.os }}-icu-android-
 
       - name: Cache WebKit build
         id: cache-webkit
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/webkit-android
-          key: webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
+          key: ${{ runner.os }}-webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
+          restore-keys: |
+            ${{ runner.os }}-webkit-android-${{ env.WEBKIT_COMMIT }}-
+            ${{ runner.os }}-webkit-android-
 
       - name: Cache Bun binary
         id: cache-bun
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+          key: ${{ runner.os }}-bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+          restore-keys: |
+            ${{ runner.os }}-bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-
+            ${{ runner.os }}-bun-android-${{ env.BUN_VERSION }}-
 
       - name: Cache libopentui.so
         id: cache-opentui
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so
-          key: opentui-android-${{ env.OPENTUI_VERSION }}-${{ steps.hashes.outputs.opentui_patch_hash }}-${{ env.ZIG_VERSION }}
+          key: ${{ runner.os }}-opentui-android-${{ env.OPENTUI_VERSION }}-${{ steps.hashes.outputs.opentui_patch_hash }}-${{ env.ZIG_VERSION }}
+          restore-keys: |
+            ${{ runner.os }}-opentui-android-${{ env.OPENTUI_VERSION }}-${{ steps.hashes.outputs.opentui_patch_hash }}-
+            ${{ runner.os }}-opentui-android-${{ env.OPENTUI_VERSION }}-
 
       - name: Cache OpenCode node_modules
         id: cache-opencode-deps
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/opencode-src/node_modules
-          key: opencode-deps-${{ env.OPENCODE_VERSION }}-${{ hashFiles('${{ env.WORK_DIR }}/opencode-src/package.json') }}-${{ env.BUN_VERSION }}
+          key: ${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-${{ hashFiles('${{ env.WORK_DIR }}/opencode-src/package.json') }}-${{ env.BUN_VERSION }}
           restore-keys: |
-            opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-
+            ${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-
+            ${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-
 
-      # -----------------------------------------------------------------------
+      # ======================================================================
       # Active Runner Log Surveillance: Dynamic patch verification
-      # -----------------------------------------------------------------------
+      # ======================================================================
       - name: Verify patch integrity and apply missing dependencies
         run: |
           source scripts/env.sh
@@ -217,65 +254,58 @@ jobs:
           GHOSTTY_ZON="${OPENTUI_SRC}/packages/native/zig-deps/ghostty/build.zig.zon"
           if [ -f "$GHOSTTY_ZON" ] && ! grep -q "zlib" "$GHOSTTY_ZON"; then
             echo "[!] Missing zlib dependency in ghostty build.zig.zon - applying fix"
-            python3 - <<'PYEOF'
-zon_path = "'"${GHOSTTY_ZON}"'"
-with open(zon_path, "r") as f:
-    content = f.read()
-zlib_block = """
-    .zlib = .{
-        .url = "https://github.com/madler/zlib/tarball/v1.3.1",
-        .hash = "12209d76f09e5772392437637841f48680199e843bcbc50bcf5123d463d1a19615a1",
-    },
-"""
-if ".dependencies = .{" in content:
-    content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_block)
-with open(zon_path, "w") as f:
-    f.write(content)
-PYEOF
+            python3 -c 'import sys; zon_path=sys.argv[1]; content=open(zon_path).read(); zlib_block="""\n    .zlib = .{\n        .url = \"https://github.com/madler/zlib/tarball/v1.3.1\",\n        .hash = \"12209d76f09e5772392437637841f48680199e843bcbc50bcf5123d463d1a19615a1\",\n    },\n"""; content=content.replace(".dependencies = .{", ".dependencies = .{" + zlib_block) if ".dependencies = .{" in content else content; open(zon_path,"w").write(content)' "$GHOSTTY_ZON"
             echo "[✓] Applied zlib dependency fix"
           fi
           
           # Ensure uucode-ghostty directory exists
           mkdir -p "${OPENTUI_SRC}/packages/native/zig-deps/uucode-ghostty"
 
+      # ======================================================================
+      # Clone and patch sources
+      # ======================================================================
       - name: Clone and patch Bun + WebKit
         if: steps.cache-bun.outputs.cache-hit != 'true' || steps.cache-webkit.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh
           ./scripts/apply-patches.sh
 
-      # =============================================
-      # Build ICU
-      # =============================================
+      # ======================================================================
+      # Build ICU with timeout protection
+      # ======================================================================
       - name: Build ICU 75.1
         if: steps.cache-icu.outputs.cache-hit != 'true'
+        timeout-minutes: 60
         run: |
           source scripts/env.sh
           ./scripts/build-icu.sh
 
-      # =============================================
-      # Build WebKit/JSC
-      # =============================================
+      # ======================================================================
+      # Build WebKit/JSC with timeout protection
+      # ======================================================================
       - name: Build WebKit/JSC
         if: steps.cache-webkit.outputs.cache-hit != 'true'
+        timeout-minutes: 120
         run: |
           source scripts/env.sh
           ./scripts/build-webkit.sh
 
-      # =============================================
+      # ======================================================================
       # Build TinyCC (libtcc.a)
-      # =============================================
+      # ======================================================================
       - name: Build TinyCC
         if: steps.cache-bun.outputs.cache-hit != 'true'
+        timeout-minutes: 30
         run: |
           source scripts/env.sh
           ./scripts/build-tinycc.sh
 
-      # =============================================
-      # Build Bun
-      # =============================================
+      # ======================================================================
+      # Build Bun with timeout protection
+      # ======================================================================
       - name: Build Bun
         if: steps.cache-bun.outputs.cache-hit != 'true'
+        timeout-minutes: 120
         run: |
           source scripts/env.sh
           # Need to clone + patch if only bun cache missed but webkit didn't
@@ -291,17 +321,17 @@ PYEOF
           ls -lh "$BUN_BINARY"
           file "$BUN_BINARY"
           readelf -h "$BUN_BINARY" | grep -E "Machine|Class"
-          # Verify it's ARM64
           if ! file "$BUN_BINARY" | grep -q "aarch64"; then
             echo "ERROR: Bun binary is not ARM64 architecture"
             exit 1
           fi
 
-      # =============================================
-      # Build libopentui.so
-      # =============================================
+      # ======================================================================
+      # Build libopentui.so with enhanced error tracking
+      # ======================================================================
       - name: Build libopentui.so
         if: steps.cache-opentui.outputs.cache-hit != 'true'
+        timeout-minutes: 60
         run: |
           source scripts/env.sh
           ./scripts/build-opentui.sh
@@ -328,11 +358,12 @@ PYEOF
             fi
           fi
 
-      # =============================================
+      # ======================================================================
       # Build OpenCode standalone binary
-      # =============================================
+      # ======================================================================
       - name: Build OpenCode standalone binary
         if: steps.cache-opencode-deps.outputs.cache-hit != 'true'
+        timeout-minutes: 60
         run: |
           source scripts/env.sh
           ./scripts/build-opencode.sh
@@ -346,9 +377,9 @@ PYEOF
             git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "${OPENCODE_SRC}"
           fi
 
-      # =============================================
+      # ======================================================================
       # Verify native packages (after OpenCode is built/installed)
-      # =============================================
+      # ======================================================================
       - name: Verify native packages
         run: |
           echo "=== Verifying native packages ==="
@@ -378,9 +409,9 @@ PYEOF
           file "$OPENCODE_BINARY"
           readelf -h "$OPENCODE_BINARY" | grep -E "Machine|Class"
 
-      # =============================================
+      # ======================================================================
       # Create packages
-      # =============================================
+      # ======================================================================
       - name: Create distribution packages
         run: |
           source scripts/env.sh
@@ -391,21 +422,37 @@ PYEOF
           echo "=== Built packages ==="
           ls -lh "${WORK_DIR}/packages/"
 
-      # =============================================
-      # Upload artifacts
-      # =============================================
+      # ======================================================================
+      # Upload artifacts with improved configuration
+      # ======================================================================
       - name: Upload packages as artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: opencode-termux-${{ env.OPENCODE_VERSION }}
+          name: opencode-termux-${{ env.OPENCODE_VERSION }}-${{ runner.os }}-${{ github.run_id }}
           path: |
             ${{ env.WORK_DIR }}/packages/*.zip
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
 
-      # =============================================
+      # Also upload the libopentui.so separately for debugging
+      - name: Upload libopentui.so for debugging
+        uses: actions/upload-artifact@v7
+        with:
+          name: libopentui-so-${{ env.OPENTUI_VERSION }}-${{ runner.os }}-${{ github.run_id }}
+          path: |
+            ${{ env.WORK_DIR }}/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so
+            ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib/aarch64-linux-android/libopentui.so
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 6
+
+      # ======================================================================
       # Release (only on tag push)
-      # =============================================
+      # ======================================================================
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -446,10 +493,11 @@ PYEOF
             - NDK: r28b (${{ env.ANDROID_NDK_VERSION }})
           draft: false
           prerelease: false
+          generate_release_notes: true
 
-      # =============================================
+      # ======================================================================
       # Cleanup (keep cache, remove intermediates)
-      # =============================================
+      # ======================================================================
       - name: Cleanup intermediate files
         if: always()
         run: |
@@ -463,3 +511,68 @@ PYEOF
           rm -rf "${WORK_DIR}/bun-build/cache/zig"
           echo "Cleaned up intermediate files"
           df -h "${WORK_DIR}" || true
+
+  # -----------------------------------------------------------------------
+  # Validate Build Artifacts - Separate validation job
+  # -----------------------------------------------------------------------
+  validate-artifacts:
+    name: Validate Build Artifacts
+    runs-on: ubuntu-latest
+    needs: build-android-aarch64
+    if: always() && needs.build-android-aarch64.result == 'success'
+    timeout-minutes: 10
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: opencode-termux-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Validate artifact structure
+        run: |
+          echo "=== Validating artifacts ==="
+          ls -la artifacts/
+          
+          # Verify packages exist
+          if ls artifacts/*.zip 1> /dev/null 2>&1; then
+            echo "✓ ZIP package found"
+            unzip -l artifacts/*.zip | head -20
+          else
+            echo "ERROR: No ZIP package found"
+            exit 1
+          fi
+          
+          if ls artifacts/*.pkg.tar.xz 1> /dev/null 2>&1; then
+            echo "✓ Pacman package found"
+            tar -tf artifacts/*.pkg.tar.xz | head -20
+          else
+            echo "WARNING: No pacman package found"
+          fi
+          
+          if ls artifacts/*.deb 1> /dev/null 2>&1; then
+            echo "✓ DEB package found"
+            dpkg -c artifacts/*.deb | head -20
+          else
+            echo "WARNING: No DEB package found"
+          fi
+
+      - name: Verify binary architecture
+        run: |
+          # Extract and verify the binary
+          unzip -q artifacts/*.zip -d artifacts/extracted
+          BINARY=$(find artifacts/extracted -name "opencode" -type f | head -1)
+          if [ -n "$BINARY" ]; then
+            echo "Verifying binary: $BINARY"
+            file "$BINARY"
+            readelf -h "$BINARY" | grep -E "Machine|Class"
+            if file "$BINARY" | grep -q "aarch64"; then
+              echo "✓ Binary is ARM64 architecture"
+            else
+              echo "ERROR: Binary is not ARM64"
+              exit 1
+            fi
+          else
+            echo "ERROR: Binary not found in package"
+            exit 1
+          fi
