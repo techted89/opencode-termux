@@ -139,6 +139,12 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig.zon" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-shared-deps.patch" -o "$WORK_DIR_ABS/ghostty-shared-deps.patch"
     (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$WORK_DIR_ABS/ghostty-shared-deps.patch") || true
+    # Apply additional patch to skip metallib for non-Apple targets (Android)
+    GHOSTTY_METALLIB_PATCH="$REPO_ROOT/patches/opentui/ghostty-android-metallib.patch"
+    if [ -f "$GHOSTTY_METALLIB_PATCH" ]; then
+        echo ">>> Applying ghostty Android metallib patch..."
+        (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$GHOSTTY_METALLIB_PATCH") || true
+    fi
     rm -rf "$WORK_DIR_ABS/ghostty-staging" "$WORK_DIR_ABS/ghostty.tar.gz" "$WORK_DIR_ABS/ghostty-shared-deps.patch"
 fi
 

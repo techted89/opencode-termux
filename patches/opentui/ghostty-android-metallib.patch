@@ -1,0 +1,36 @@
+diff --git a/src/build/SharedDeps.zig b/src/build/SharedDeps.zig
+--- a/src/build/SharedDeps.zig
++++ b/src/build/SharedDeps.zig
+@@ -80,6 +80,7 @@ pub fn init(b: *std.Build, cfg: *const Config) !SharedDeps {
+         .config = cfg,
+         .help_strings = try .init(b, cfg),
+         .unicode_tables = try .init(b, uucode_tables),
+-        .framedata = try .init(b),
++        // OpenTUI only consumes the ghostty-vt module, which does not use GUI frame data.
++        .framedata = undefined,
+         .uucode_tables = uucode_tables,
+         .uucode_mod = uucode_mod,
+ 
+@@ -120,7 +121,11 @@ pub fn initTarget(
+     self: *SharedDeps,
+     b: *std.Build,
+     target: std.Build.ResolvedTarget,
+ ) !void {
+-    // Update our metallib
+-    self.metallib = .create(b, .{
+-        .name = "Ghostty",
+-        .target = target,
+-        .sources = &.{b.path("src/renderer/shaders/shaders.metal")},
+-    });
++    // Only create metallib for Apple targets (macOS, iOS, etc.)
++    // Android and other non-Apple targets don't support Metal
++    if (target.os.tag.isDarwin() or target.os.tag.isIOS() or target.os.tag.isMacOS()) {
++        self.metallib = .create(b, .{
++            .name = "Ghostty",
++            .target = target,
++            .sources = &.{b.path("src/renderer/shaders/shaders.metal")},
++        });
++    }
+ 
+     // Change our config
+     const config = try b.allocator.create(Config);
