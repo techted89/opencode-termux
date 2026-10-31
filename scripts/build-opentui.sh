@@ -208,6 +208,7 @@ msvc_lib_dir=
 kernel32_lib_dir=
 gcc_dir=
 darwin_sdk_dir=
+cc_dir=$NDK_TOOLCHAIN/bin
 EOF
 
 export ANDROID_NDK_HOME BIONIC_SYSROOT_INC ZIG_LIBC ANDROID_NDK_LIB_DIR
