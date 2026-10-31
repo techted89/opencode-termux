@@ -149,23 +149,23 @@ mkdir -p "$OPENTUI_ZIG_DEPS/uucode-ghostty"
 GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
 if [ -f "$GHOSTTY_ZON" ]; then
     if ! grep -q "zlib" "$GHOSTTY_ZON"; then
-        echo ">>> Skipping zlib patch - testing without explicit zlib dependency"
-        # python3 - "$GHOSTTY_ZON" <<'PYEOF'
-        # import sys
-        # zon_path = sys.argv[1]
-        # with open(zon_path, "r") as f:
-        #     content = f.read()
-        # zlib_dep = """
-        #     .zlib = .{
-        #         .url = "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
-        #         .hash = "sha256-mpOyt9/ax3zrpaVYpYDnRmfdb+3kWFuR7vtg8Dty3yM",
-        #     },
-        # """
-        # content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)
-        # with open(zon_path, "w") as f:
-        #     f.write(content)
-        # print("Patched ghostty build.zig.zon with zlib dependency")
-        # PYEOF
+        echo ">>> Patching ghostty build.zig.zon for zlib..."
+        python3 - "$GHOSTTY_ZON" <<'PYEOF'
+import sys
+zon_path = sys.argv[1]
+with open(zon_path, "r") as f:
+    content = f.read()
+zlib_dep = """
+    .zlib = .{
+        .url = "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+        .hash = "sha256-9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+    },
+"""
+content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)
+with open(zon_path, "w") as f:
+    f.write(content)
+print("Patched ghostty build.zig.zon with zlib dependency")
+PYEOF
     fi
 fi
 
