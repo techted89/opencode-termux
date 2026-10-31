@@ -158,7 +158,7 @@ with open(zon_path, "r") as f:
 zlib_dep = """
     .zlib = .{
         .url = "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
-        .hash = "EiCak7K339rHfOulpVilgOdGZ91v7eRYW5Hu-2DwO3LfIw",
+        .hash = "sha256-mpOyt9/ax3zrpaVYpYDnRmfdb+3kWFuR7vtg8Dty3yM",
     },
 """
 content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)
