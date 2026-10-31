@@ -1,7 +1,8 @@
 diff --git a/src/build/SharedDeps.zig b/src/build/SharedDeps.zig
+index 1234567..abcdefg 100644
 --- a/src/build/SharedDeps.zig
 +++ b/src/build/SharedDeps.zig
-@@ -80,6 +80,7 @@ pub fn init(b: *std.Build, cfg: *const Config) !SharedDeps {
+@@ -80,7 +80,8 @@ pub fn init(b: *std.Build, cfg: *const Config) !SharedDeps {
          .config = cfg,
          .help_strings = try .init(b, cfg),
          .unicode_tables = try .init(b, uucode_tables),
@@ -11,7 +12,7 @@ diff --git a/src/build/SharedDeps.zig b/src/build/SharedDeps.zig
          .uucode_tables = uucode_tables,
          .uucode_mod = uucode_mod,
  
-@@ -120,7 +121,11 @@ pub fn initTarget(
+@@ -120,11 +121,15 @@ pub fn initTarget(
      self: *SharedDeps,
      b: *std.Build,
      target: std.Build.ResolvedTarget,
