@@ -174,7 +174,7 @@ if [ ! -f "$UUCOD_GHOSTTY_ZON" ]; then
     echo ">>> Creating build.zig.zon for uucode-ghostty..."
     cat > "$UUCOD_GHOSTTY_ZON" <<'EOF'
 .{
-    .name = "uucode",
+    .name = .uucode,
     .version = "0.1.0",
     .paths = .{"src"},
     .dependencies = .{},
