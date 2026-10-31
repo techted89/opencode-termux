@@ -32,6 +32,14 @@ This repository cross-compiles OpenCode for Android/Termux (aarch64) using GitHu
 - Work dir: `/home/runner/work/opencode-termux/opencode-termux/build`
 - NDK: `/opt/android-ndk` (pre-installed on runner)
 
+## Mandatory Context7 MCP & Runner Intelligence Protocol
+
+1. **Context7 MCP Research Gate:** Prior to executing any shell command, cross-compilation task, or patch application, the agent **must** utilize the Context7 MCP server and online web/repository search utilities to research exact GitHub Actions runner environments, Zig build options, and library dependencies. Never guess dependency hashes, compiler flags, or API level requirements.
+
+2. **Active Runner Log Surveillance:** While GitHub Actions workflows execute, the agent must continuously poll runner logs, intercept build warnings, compiler panics (`SIGABRT`), and missing dependency traces (e.g., missing `zlib` in `build.zig.zon` or `uucode-ghostty` paths).
+
+3. **Dynamic Patch Identification & Management:** When build errors or runner regressions occur, the agent must actively identify, generate, and apply targeted source patches or script fixes. Simultaneously, the agent must remove obsolete patch changes from legacy code that are no longer relevant to current upstream releases.
+
 ## Critical Build Dependencies
 
 | Component | Version | Notes |

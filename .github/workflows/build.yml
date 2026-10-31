@@ -206,9 +206,38 @@ jobs:
           restore-keys: |
             opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-
 
-      # =============================================
-      # Clone and patch sources
-      # =============================================
+      # -----------------------------------------------------------------------
+      # Active Runner Log Surveillance: Dynamic patch verification
+      # -----------------------------------------------------------------------
+      - name: Verify patch integrity and apply missing dependencies
+        run: |
+          source scripts/env.sh
+          
+          # Check for missing zlib in ghostty build.zig.zon
+          GHOSTTY_ZON="${OPENTUI_SRC}/packages/native/zig-deps/ghostty/build.zig.zon"
+          if [ -f "$GHOSTTY_ZON" ] && ! grep -q "zlib" "$GHOSTTY_ZON"; then
+            echo "[!] Missing zlib dependency in ghostty build.zig.zon - applying fix"
+            python3 -c '
+zon_path = "'"${GHOSTTY_ZON}"'"
+with open(zon_path, "r") as f:
+    content = f.read()
+zlib_block = """
+    .zlib = .{
+        .url = "https://github.com/madler/zlib/tarball/v1.3.1",
+        .hash = "12209d76f09e5772392437637841f48680199e843bcbc50bcf5123d463d1a19615a1",
+    },
+"""
+if ".dependencies = .{" in content:
+    content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_block)
+with open(zon_path, "w") as f:
+    f.write(content)
+'
+            echo "[✓] Applied zlib dependency fix"
+          fi
+          
+          # Ensure uucode-ghostty directory exists
+          mkdir -p "${OPENTUI_SRC}/packages/native/zig-deps/uucode-ghostty"
+
       - name: Clone and patch Bun + WebKit
         if: steps.cache-bun.outputs.cache-hit != 'true' || steps.cache-webkit.outputs.cache-hit != 'true'
         run: |
