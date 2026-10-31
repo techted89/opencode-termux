@@ -14,8 +14,17 @@ source "$SCRIPT_DIR/env.sh"
 
 # Use absolute paths so they remain valid after cd into subdirectories
 REPO_ROOT_ABS="$(cd "$REPO_ROOT" && pwd)"
-OPENTUI_SRC_ABS="${REPO_ROOT_ABS}/${OPENTUI_SRC#./}"
-WORK_DIR_ABS="${REPO_ROOT_ABS}/${WORK_DIR#./}"
+# Handle paths that may already be absolute
+if [[ "$OPENTUI_SRC" = /* ]]; then
+    OPENTUI_SRC_ABS="$OPENTUI_SRC"
+else
+    OPENTUI_SRC_ABS="${REPO_ROOT_ABS}/${OPENTUI_SRC#./}"
+fi
+if [[ "$WORK_DIR" = /* ]]; then
+    WORK_DIR_ABS="$WORK_DIR"
+else
+    WORK_DIR_ABS="${REPO_ROOT_ABS}/${WORK_DIR#./}"
+fi
 
 OPENTUI_VERSION="${OPENTUI_VERSION:-0.5.10}"
 OPENTUI_COMMIT_OR_TAG="v${OPENTUI_VERSION}"
@@ -148,8 +157,8 @@ with open(zon_path, "r") as f:
     content = f.read()
 zlib_dep = """
     .zlib = .{
-        .url = "https://github.com/madler/zlib/tarball/v1.3.1",
-        .hash = "12209d76f09e5772392437637841f48680199e843bcbc50bcf5123d463d1a19615a1",
+        .url = "https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz",
+        .hash = "ciqbp2eimpzwabtsvnerqlzboka3n7cnhr3cxxrwde26invjkiknaxa",
     },
 """
 content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)

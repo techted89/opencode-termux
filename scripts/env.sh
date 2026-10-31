@@ -17,7 +17,7 @@ export OPENCODE_VERSION="${OPENCODE_VERSION:-1.19.4}"
 export ANDROID_API="${ANDROID_API:-24}"
 
 # Android NDK
-export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-/opt/android-ndk}"
+export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-/data/data/com.termux/files/home/android-ndk/android-ndk-r28b}"
 export ANDROID_ABI=arm64-v8a
 export ANDROID_ARCH=aarch64
 export ANDROID_TRIPLE="aarch64-linux-android"

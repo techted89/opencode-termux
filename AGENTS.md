@@ -12,6 +12,26 @@ This repository cross-compiles OpenCode for Android/Termux (aarch64) using GitHu
 - `patches/` — upstream patches for Bun, WebKit, Zig, OpenTUI
 - `build/` — ephemeral build artifacts (gitignored)
 
+## Build Execution: GitHub Actions Remote Runner Required
+
+**IMPORTANT**: All builds MUST be executed via GitHub Actions remote runner (`ubuntu-latest`). Local Termux development environment has:
+- No root access (`/opt`, `/` not writable)
+- Limited directory access (only `/data/data/com.termux/files/home/`)
+- No Android NDK pre-installed
+- Resource constraints (memory, CPU) insufficient for WebKit/Bun compilation
+
+**Development workflow**:
+1. Make changes locally in Termux
+2. Commit and push to GitHub
+3. Trigger GitHub Actions workflow (manual or on push)
+4. Monitor build logs and download artifacts
+5. Verify artifacts on device if needed
+
+**Path handling**: Scripts use `REPO_ROOT` + relative paths so they work in both environments. GitHub Actions runner paths:
+- Repo root: `/home/runner/work/opencode-termux/opencode-termux`
+- Work dir: `/home/runner/work/opencode-termux/opencode-termux/build`
+- NDK: `/opt/android-ndk` (pre-installed on runner)
+
 ## Critical Build Dependencies
 
 | Component | Version | Notes |

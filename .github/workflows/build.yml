@@ -308,6 +308,15 @@ jobs:
           source scripts/env.sh
           ./scripts/build-opencode.sh
 
+      - name: Ensure OpenCode source exists for verification
+        if: steps.cache-opencode-deps.outputs.cache-hit == 'true'
+        run: |
+          source scripts/env.sh
+          if [ ! -d "${OPENCODE_SRC}/.git" ]; then
+            echo ">>> Cloning OpenCode for verification..."
+            git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "${OPENCODE_SRC}"
+          fi
+
       # =============================================
       # Verify native packages (after OpenCode is built/installed)
       # =============================================
