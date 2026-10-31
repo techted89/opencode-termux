@@ -217,7 +217,7 @@ jobs:
           GHOSTTY_ZON="${OPENTUI_SRC}/packages/native/zig-deps/ghostty/build.zig.zon"
           if [ -f "$GHOSTTY_ZON" ] && ! grep -q "zlib" "$GHOSTTY_ZON"; then
             echo "[!] Missing zlib dependency in ghostty build.zig.zon - applying fix"
-            python3 -c '
+            python3 - <<'PYEOF'
 zon_path = "'"${GHOSTTY_ZON}"'"
 with open(zon_path, "r") as f:
     content = f.read()
@@ -231,7 +231,7 @@ if ".dependencies = .{" in content:
     content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_block)
 with open(zon_path, "w") as f:
     f.write(content)
-'
+PYEOF
             echo "[✓] Applied zlib dependency fix"
           fi
           
