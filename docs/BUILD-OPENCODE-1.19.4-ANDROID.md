@@ -23,17 +23,18 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 `README.md` and design notes (context, sometimes stale). See
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
-**Status.** Every native stage is now green in CI. Run #41281683381 built, verified and
-cached `libopentui.so`; run #41282039365 restored that cache (skipping the Zig build) and then
-built, verified and cached ICU 75.1, WebKit/JSC, TinyCC and the Android Bun binary. Its
-failure is now in the last stage, `Build OpenCode standalone binary`: `bun install` aborts
-with `"git clone" for "@types/bun" failed` because Bun 1.2.13 cannot parse the `catalog:`
-entries in OpenCode's committed `bun.lock`. `build-opencode.sh` now discards the lockfile so
-Bun resolves the rewritten manifests; reproduced and fixed locally with Bun 1.2.13. With that
-in place, run #41319756768 installed 9,025 packages and reached the bundler, which exposed two
-OpenCode 1.19.4 layout changes: the TUI worker moved to `src/cli/tui/worker.ts`, and Bun will
-not unpack `@opentui/core-*` packages for non-host platforms even though the bundler resolves
-their imports. Both are fixed here. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
+**Status.** The pipeline is green end to end. Run
+[#41321381469](https://github.com/techted89/opencode-termux/actions/runs/41321381469) on
+`3adb53e` restored every native cache (OpenTUI, ICU, WebKit, Bun), installed OpenCode's
+dependencies, bundled and transplanted the module graph, packaged `.zip`/`.deb`/`.pkg.tar.xz`,
+uploaded the artifacts and passed the `Validate Build Artifacts` job. The downloaded zip
+contains an AArch64 `opencode.bin` with interpreter `/system/bin/linker64` and a
+`libopentui.so` whose `NEEDED` entries are `libm.so`, `libc.so` and `libdl.so`. What remains is
+a device smoke test of the TUI, because the bundled JS pins `@opentui/core` 0.4.5 while the
+native library is built from OpenTUI 0.5.10 (the C symbol comparison is clean; see §24.5).
+[§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run history and
+failure taxonomy. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it and is out of scope;
+see [§19.7](#197-v1-vs-v2-pipelines). [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
 diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it
 and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
@@ -2198,6 +2199,7 @@ compiler test — not from log lines. Anything that would need log text is marke
 | #77–#86 | 2026-10-31 → 11-01 | **all fail** at `Build libopentui.so` |
 | #87–#92 | 2026-11-01 | OpenTUI fixes; first green OpenTUI at #41281683381 |
 | #93 | 2026-11-01 06:44 | ICU, WebKit, TinyCC and Bun all green; OpenCode install fails (#41282039365) |
+| #94 | 2026-11-01 15:28 | **success**: caches hit, bundle + transplant + packages + validation (#41321381469) |
 
 The important signal is not the count but the shape: a twelve-second OpenTUI failure streak
 was finally broken in #41281683381, after which the pipeline advanced through every native
@@ -2353,6 +2355,13 @@ the prebuilt arm64 libraries, every C symbol exported by 0.4.5 is present in 0.5
 that are missing are C++ runtime internals (`_ZNSt3__1…`, `_ZNSt12…`). The native library is
 kept, but the version skew remains a runtime risk to verify on a device.
 
+Run #41321013354 then showed that Bun 1.3.2 installs workspace dependencies in an isolated
+layout, so the filesystem stubs were never resolvable. The bundler now intercepts the seven
+non-host platform imports with a `Bun.build` plugin and returns a module that reads
+`OPENTUI_LIB_PATH` at runtime. Running the full bundle locally with Bun 1.3.2 produced a
+25-module host graph; grafting it onto a 1.2.13 runtime printed `1.19.4`, and CI run
+#41321381469 completed the entire pipeline.
+
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
 pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
@@ -2413,12 +2422,12 @@ OpenTUI's `build.zig`.
 
 ### 24.8 Open items from the audit
 
-- All native artifacts are green as of run #41282039365. The OpenCode install now succeeds;
-  the next gate is the bundle (`Build OpenCode standalone binary`), where the TUI entrypoint
-  and the platform-package stubs were fixed. After it passes, confirm the transplant,
-  packaging and artifact upload.
-- The bundled JS uses `@opentui/core` 0.4.5 while `libopentui.so` is built from 0.5.10. The
-  symbol comparison is clean, but a device smoke test of the TUI is still required.
+- The build is green as of run #41321381469. Remaining work is runtime validation on a device:
+  install the `.deb` or `.pkg.tar.xz`, run `opencode`, and confirm the TUI loads
+  `libopentui.so` through `OPENTUI_LIB_PATH`.
+- The bundled JS pins `@opentui/core` 0.4.5 while `libopentui.so` is built from 0.5.10. Every
+  C export from 0.4.5 exists in 0.5.10 (the 15 missing symbols are C++ runtime internals), but
+  the device smoke test above is still required.
 - Ghostty patch markers are now asserted in `build-opentui.sh`; re-verify them after any
   OpenTUI or ghostty vendor bump, including the `git init` fix and the regenerated metallib
   patch context.
