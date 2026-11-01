@@ -827,16 +827,41 @@ shader library, which does not exist on Android (and `framedata` is unused by th
 +        // OpenTUI only consumes the ghostty-vt module, which does not use GUI frame data.
 +        .framedata = undefined,
 @@
+-    // Update our metallib
 -    self.metallib = .create(b, .{ ... });
-+    if (target.os.tag.isDarwin() or target.os.tag.isIOS() or target.os.tag.isMacOS()) {
++    // Only create metallib for Apple targets (macOS, iOS, etc.)
++    if (target.result.os.tag.isDarwin()) {
 +        self.metallib = .create(b, .{ ... });
 +    }
 ```
 
 The local metallib patch contains only the guard hunk; the `.framedata` change is provided by
-OpenTUI's `ghostty-shared-deps.patch`. `build-opentui.sh` applies both through
+OpenTUI's `ghostty-shared-deps.patch`. Its context was regenerated against the pinned commit
+`aeda37b` and the guard reads `target.result.os.tag.isDarwin()`: `std.Build.ResolvedTarget`
+exposes the target as `.result` in Zig 0.16, and `isIOS()`/`isMacOS()` are already covered by
+`isDarwin()`. The previous context no longer matched the pinned source, so the patch would have
+been rejected as soon as the shared-deps failure stopped masking it. `build-opentui.sh` applies both through
 `apply_verified_patch` and fails unless the corresponding marker is present in
 `src/build/SharedDeps.zig`.
+
+**The silent-skip trap (CI run 41279562301).** The ghostty tree is extracted into
+`build/opentui-src/packages/native/zig-deps/ghostty`, which lives inside the
+`opencode-termux` worktree but is not itself a Git repository. `git apply` resolves patch
+paths against the worktree root of the *enclosing* repository, so it looked for
+`opencode-termux/src/build/SharedDeps.zig`, printed `Skipped patch 'src/build/SharedDeps.zig'.`,
+and **exited 0**. Both `git apply --check` and `git apply` therefore reported success while
+the file stayed untouched, and the helper failed afterwards on the missing marker:
+
+```text
+    ghostty shared-deps: applied
+ERROR: ghostty shared-deps patch did not take effect in src/build/SharedDeps.zig
+       expected marker: .framedata = undefined,
+```
+
+`apply_verified_patch` now runs `git init -q` in any vendor tree that has no `.git`, so patch
+paths resolve from that tree, and it also treats `Skipped patch` in `git apply --verbose`
+output as a hard failure. Vendor clones created with `git clone`/`git init` (Bun, WebKit,
+OpenTUI) were never affected because their own `.git` stops the upward search.
 
 **(c) `patches/opentui/v2-0.5.10-android.patch`** — adds the `aarch64-linux-android` library
 target to `packages/native/build.zig`, the Bionic sysroot include/lib helpers consumed by
@@ -2258,6 +2283,7 @@ patch may contain further 0.16 API mismatches that only a full build reveals.
 | Hand-encoded dependency hash | ghostty `zlib` (12 attempts) | `zig fetch <url>` and paste its output | guessing hex/base32/base64 variants |
 | Build-API drift | Zig 0.15 vs 0.16 vs 0.17 `build.zig` | pin Zig, validate generated scripts, consult `lib/std/Build.zig` | changing the Zig version |
 | Hidden patch failure | `git apply … || true` for ghostty | fail on patch mismatch, or assert the expected symbol | continuing with a half-patched tree |
+| Patch applied to the wrong tree | `git apply` inside `build/…/ghostty` skipped everything and exited 0 | `git init` the vendor tree; treat `Skipped patch` as an error | trusting `git apply` exit status alone |
 | Cached artifact staleness | Zig `translate-c` `FileNotFound` | delete both caches and symlink them | clearing one cache |
 | Post-link execution of target binary | `bun --revision` on host | `if(NOT ANDROID)` guards | disabling tests globally |
 | Seccomp `SIGSYS` | `close_range` on Android | syscall fallback (v1) or SIGSYS→ENOSYS handler (v2) | retrying the same binary |
@@ -2269,7 +2295,10 @@ patch may contain further 0.16 API mismatches that only a full build reveals.
    generated `build.zig`.
 2. **Do not hide patch failures.** The ghostty vendor patches now go through
    `apply_verified_patch`, which applies (or confirms an already-applied patch) and then
-   requires the patched marker in `src/build/SharedDeps.zig`. The local metallib patch was
+   requires the patched marker in `src/build/SharedDeps.zig`. The helper also gives an
+   un-versioned vendor tree its own Git repository first: without it `git apply` resolves
+   paths against the enclosing `opencode-termux` worktree, skips every hunk and exits 0
+   (§11.4b). The local metallib patch was
    reduced to its guard hunk: its first hunk duplicated the shared-deps change, so the two
    could never apply in sequence. The OpenTUI Android patch uses the same helper, with its
    marker in `packages/native/build.zig`; the old libc-link patch was retired because its

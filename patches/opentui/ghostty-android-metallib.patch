@@ -1,25 +1,26 @@
 diff --git a/src/build/SharedDeps.zig b/src/build/SharedDeps.zig
+index 7f777fa..bd45f47 100644
 --- a/src/build/SharedDeps.zig
 +++ b/src/build/SharedDeps.zig
-@@ -32,12 +32,15 @@
-         b: *std.Build,
-         target: std.Build.ResolvedTarget,
-     ) !void {
--        // Update our metallib
--        self.metallib = .create(b, .{
--            .name = "Ghostty",
--            .target = target,
--            .sources = &.{b.path("src/renderer/shaders/shaders.metal")},
--        });
-+        // Only create metallib for Apple targets (macOS, iOS, etc.)
-+        // Android and other non-Apple targets don't support Metal
-+        if (target.os.tag.isDarwin() or target.os.tag.isIOS() or target.os.tag.isMacOS()) {
-+            self.metallib = .create(b, .{
-+                .name = "Ghostty",
-+                .target = target,
-+                .sources = &.{b.path("src/renderer/shaders/shaders.metal")},
-+            });
-+        }
+@@ -135,12 +135,15 @@ fn initTarget(
+     b: *std.Build,
+     target: std.Build.ResolvedTarget,
+ ) !void {
+-    // Update our metallib
+-    self.metallib = .create(b, .{
+-        .name = "Ghostty",
+-        .target = target,
+-        .sources = &.{b.path("src/renderer/shaders/shaders.metal")},
+-    });
++    // Only create metallib for Apple targets (macOS, iOS, etc.)
++    // Android and other non-Apple targets don't support Metal
++    if (target.result.os.tag.isDarwin()) {
++        self.metallib = .create(b, .{
++            .name = "Ghostty",
++            .target = target,
++            .sources = &.{b.path("src/renderer/shaders/shaders.metal")},
++        });
++    }
  
-         // Change our config
-         const config = try b.allocator.create(Config);
+     // Change our config
+     const config = try b.allocator.create(Config);

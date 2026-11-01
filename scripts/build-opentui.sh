@@ -69,14 +69,33 @@ apply_verified_patch() {
         exit 1
     fi
 
+    # `git apply` resolves patch paths from the worktree root of the repository
+    # that encloses the current directory, not from the current directory. The
+    # ghostty tree is extracted into build/ inside this project but is not a
+    # repository, so without this Git resolved "src/build/SharedDeps.zig"
+    # against opencode-termux, printed "Skipped patch ...", and still exited 0.
+    # Give every vendor tree its own repository so patch paths are relative to
+    # it. (docs section 11.4b)
+    if [ ! -d "$dir/.git" ]; then
+        git -C "$dir" init -q
+    fi
+
+    local apply_output=""
     if (cd "$dir" && git apply --check "$patch_file" 2>/dev/null); then
-        (cd "$dir" && git apply "$patch_file")
+        apply_output="$(cd "$dir" && git apply --verbose "$patch_file" 2>&1)"
         echo "    $label: applied"
     elif (cd "$dir" && git apply -R --check "$patch_file" 2>/dev/null); then
         echo "    $label: already applied"
     else
         echo "ERROR: $label patch does not apply to $dir" >&2
         (cd "$dir" && git apply --stat "$patch_file") >&2 || true
+        exit 1
+    fi
+
+    # A skipped hunk exits 0. Belt and braces beside the repository init above.
+    if [[ "$apply_output" == *"Skipped patch"* ]]; then
+        echo "ERROR: $label patch was skipped in $dir" >&2
+        printf '%s\n' "$apply_output" >&2
         exit 1
     fi
 
