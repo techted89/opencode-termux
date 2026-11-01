@@ -10,7 +10,7 @@ index 267d1f8..7794bdf 100644
 +                // the dynamic linker, so /proc/self/exe points at linker64, not at
 +                // the file that contains the module graph.
 +                if (bun.getenvZ("BUN_SELF_EXE")) |self_exe_override| {
-+                    if (std.fs.cwd().openFileZ(self_exe_override, .{})) |file| {
++                    if (std.fs.cwd().openFile(self_exe_override, .{})) |file| {
 +                        return .fromStdFile(file);
 +                    } else |_| {}
 +                }
