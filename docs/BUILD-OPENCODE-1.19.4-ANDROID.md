@@ -24,16 +24,16 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
 **Status.** The v1 engine has produced working artifacts (successful CI runs through #57),
-but the current head is **not green**. Runs #41280310141 through #41281095820 confirmed the
-ghostty patch fixes and exposed four defects in the vendored OpenTUI dependencies, all fixed
-here: the hand-written `uucode-ghostty/build.zig` did not implement the interface ghostty
-requests (`-Dbuild_config_path`, `-Dtables_path`, `namedLazyPath("tables.zig")`,
+but the current head is **not green**. Runs #41280310141 through #41281508898 confirmed the
+ghostty patch fixes and exposed a series of defects in the vendored OpenTUI dependency setup,
+all fixed here: the hand-written `uucode-ghostty/build.zig` did not implement the interface
+ghostty requests (`-Dbuild_config_path`, `-Dtables_path`, `namedLazyPath("tables.zig")`,
 `module("uucode")`); the workflow pre-created that directory so the extraction was skipped;
-zlib.net answered the runner with an HTML page; and the vendored ghostty `build.zig.zon`
-omitted the `wuffs`/`translate-c` path dependencies that Kitty graphics needs on Android.
-[§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
-diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it
-and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
+zlib.net answered the runner with an HTML page; the vendored ghostty `build.zig.zon` omitted
+the `wuffs`, `simdutf`, `highway` and `translate-c` path dependencies; and OpenTUI's build
+rejects the undeclared `-Dstrip` option. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker)
+has the run data, diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2)
+lives beside it and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
 ---
 
@@ -379,7 +379,7 @@ downloaded and, where upstream does not publish them, `build.zig`/`build.zig.zon
 for the Zig 0.16 API. Build:
 
 ```sh
-zig build -Dlibrary-target=aarch64-linux-android -Doptimize=ReleaseSafe -Dstrip=true
+zig build -Dlibrary-target=aarch64-linux-android -Doptimize=ReleaseSafe
 ```
 
 Two post-conditions are enforced, because both have caused silent runtime failures:
@@ -1426,7 +1426,7 @@ helper.
 | `LINKER:--undefined=_android_tls_align_force` | Bun link flags | Keeps the TLS-alignment object through `--gc-sections` |
 | `ZIG_CPU=baseline` | Bun CMake patch | `-Dcpu=native` is invalid when cross-compiling |
 | `-Dandroid-ndk-sysroot=…` | Bun Zig flags | Gives `translate-c` Bionic headers |
-| `-Dstrip=true`, `-Doptimize=ReleaseSafe` | OpenTUI | Small, checked release `.so` |
+| `-Doptimize=ReleaseSafe` | OpenTUI | Release `.so`; `-Dstrip` is not declared by OpenTUI 0.5.10 and makes Zig reject the invocation (run #41281508898) |
 | `RUSTFLAGS` (space-separated) | Bun CMake patch | CMake cannot pass the encoded `0x1F` separator |
 
 ### 20.4 WebKit/JSC build graph and header contract
@@ -2306,6 +2306,11 @@ with Zig 0.16.0 therefore panicked next on `simdutf`, so `pkg/simdutf` and `pkg/
 vendored and declared as lazy path dependencies too. The shims fetch their own sources by URL
 and hash, and the local evaluation reaches ghostty's module graph with all four declared.
 
+A fifth defect was in the Zig invocation itself: `build-opentui.sh` passed `-Dstrip=true`, but
+OpenTUI 0.5.10 declares no `strip` option, so run #41281508898 failed before compiling
+anything with `error: invalid option: -Dstrip`. The flag is gone; ReleaseSafe output is left
+unstripped and stripped later during packaging.
+
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
 pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
@@ -2321,6 +2326,7 @@ OpenTUI's `build.zig`.
 | Hand-encoded dependency hash | ghostty `zlib` (12 attempts) | `zig fetch <url>` and paste its output | guessing hex/base32/base64 variants |
 | Unstable dependency URL | zlib.net served `text/html` to the runner (run #41280877999) | pin the GitHub release asset, byte-identical per `zig fetch` | trusting HTTP 200 for a binary download |
 | Incomplete vendored manifest | OpenTUI's `ghostty-build.zig.zon` omitted `wuffs`, then `simdutf`/`highway` (run #41281095820 and local evaluation) | copy the `pkg/*` shims and declare them as upstream ghostty does | adding only the first missing dependency |
+| Phantom build option | `-Dstrip=true` on OpenTUI 0.5.10 (run #41281508898) | pass only options the build declares; check `zig build -h` | assuming a standard option set |
 | Build-API drift | Zig 0.15 vs 0.16 vs 0.17 `build.zig` | pin Zig, validate generated scripts, consult `lib/std/Build.zig` | changing the Zig version |
 | Hidden patch failure | `git apply … || true` for ghostty | fail on patch mismatch, or assert the expected symbol | continuing with a half-patched tree |
 | Patch applied to the wrong tree | `git apply` inside `build/…/ghostty` skipped everything and exited 0 | `git init` the vendor tree; treat `Skipped patch` as an error | trusting `git apply` exit status alone |

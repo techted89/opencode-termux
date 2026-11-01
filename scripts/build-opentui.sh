@@ -326,10 +326,12 @@ cd "$OPENTUI_ZIG_DIR"
 # Clean any previous build artifacts for this target
 rm -rf "$OPENTUI_ZIG_DIR/lib/aarch64-linux-android"
 
+# OpenTUI 0.5.10 does not declare a -Dstrip option; passing it makes Zig
+# reject the whole invocation (run 41281508898). ReleaseSafe output is left
+# unstripped here and stripped when the packages are assembled.
 "$ZIG_BIN_ABS" build \
     -Dlibrary-target=aarch64-linux-android \
     -Doptimize=ReleaseSafe \
-    -Dstrip=true \
     2>&1
 
 # The build installs shared library to ../lib/{output_name} relative to
