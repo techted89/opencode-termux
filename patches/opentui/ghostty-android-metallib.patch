@@ -1,19 +1,8 @@
 diff --git a/src/build/SharedDeps.zig b/src/build/SharedDeps.zig
-index 1234567..abcdefg 100644
+index 7f777fa..bd45f47 100644
 --- a/src/build/SharedDeps.zig
 +++ b/src/build/SharedDeps.zig
-@@ -80,7 +80,8 @@ pub fn init(b: *std.Build, cfg: *const Config) !SharedDeps {
-         .config = cfg,
-         .help_strings = try .init(b, cfg),
-         .unicode_tables = try .init(b, uucode_tables),
--        .framedata = try .init(b),
-+        // OpenTUI only consumes the ghostty-vt module, which does not use GUI frame data.
-+        .framedata = undefined,
-         .uucode_tables = uucode_tables,
-         .uucode_mod = uucode_mod,
- 
-@@ -120,11 +121,15 @@ pub fn initTarget(
-     self: *SharedDeps,
+@@ -135,12 +135,15 @@ fn initTarget(
      b: *std.Build,
      target: std.Build.ResolvedTarget,
  ) !void {
@@ -25,7 +14,7 @@ index 1234567..abcdefg 100644
 -    });
 +    // Only create metallib for Apple targets (macOS, iOS, etc.)
 +    // Android and other non-Apple targets don't support Metal
-+    if (target.os.tag.isDarwin() or target.os.tag.isIOS() or target.os.tag.isMacOS()) {
++    if (target.result.os.tag.isDarwin()) {
 +        self.metallib = .create(b, .{
 +            .name = "Ghostty",
 +            .target = target,

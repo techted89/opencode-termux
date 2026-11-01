@@ -21,10 +21,22 @@ source "$SCRIPT_DIR/env.sh"
 
 # Use absolute paths so they remain valid after cd into subdirectories
 REPO_ROOT_ABS="$(cd "$REPO_ROOT" && pwd)"
-OPENCODE_SRC_ABS="${REPO_ROOT_ABS}/${OPENCODE_SRC#./}"
-OPENTUI_SRC_ABS="${REPO_ROOT_ABS}/${OPENTUI_SRC#./}"
-BUN_BUILD_ABS="${REPO_ROOT_ABS}/${BUN_BUILD#./}"
-DIST_DIR_ABS="${REPO_ROOT_ABS}/${DIST_DIR#./}"
+
+# env.sh defaults some paths relative to REPO_ROOT and the workflow overrides them
+# with relative values, so accept both absolute and relative inputs.
+abspath() {
+    case "$1" in
+        /*) printf '%s\n' "$1" ;;
+        *) printf '%s\n' "${REPO_ROOT_ABS}/${1#./}" ;;
+    esac
+}
+
+OPENCODE_SRC_ABS="$(abspath "$OPENCODE_SRC")"
+OPENTUI_SRC_ABS="$(abspath "$OPENTUI_SRC")"
+BUN_BUILD_ABS="$(abspath "$BUN_BUILD")"
+WORK_DIR_ABS="$(abspath "$WORK_DIR")"
+WEBKIT_OUTPUT_ABS="$(abspath "$WEBKIT_OUTPUT")"
+DIST_DIR_ABS="$(abspath "$DIST_DIR")"
 
 HOST_BUN="${HOST_BUN:-bun}"
 
@@ -149,19 +161,27 @@ OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
-# Install without --ignore-scripts to ensure optional native packages are installed
-# Use --platform and --arch to ensure all platform-specific native packages are available
-"$HOST_BUN" install --no-cache
 
-# Also explicitly install the ARM64 native package for the libopentui.so swap
-# This ensures @opentui/core-linux-arm64 is available even on x64 host
-echo ">>> Installing ARM64 native package..."
-"$HOST_BUN" add -D @opentui/core-linux-arm64@0.5.10 --no-cache 2>/dev/null || true
-# Ensure x64 native package is installed for the libopentui.so swap
-"$HOST_BUN" add -D @opentui/core-linux-x64@0.5.10 --no-cache 2>/dev/null || true
-# Also install musl variants to avoid resolution errors during bundling
-"$HOST_BUN" add -D @opentui/core-linux-arm64-musl@0.5.10 --no-cache 2>/dev/null || true
-"$HOST_BUN" add -D @opentui/core-linux-x64-musl@0.5.10 --no-cache 2>/dev/null || true
+# Bun 1.2.13 cannot parse the `catalog:` entries in OpenCode's committed bun.lock:
+# it treats the unknown protocol as a Git spec and aborts with
+#   error: "git clone" for "@types/bun" failed
+# even after the manifests above are rewritten (run 41282039365). Scrubbing single
+# lockfile entries only moved the failure to @types/node, so discard the lockfile and
+# let Bun resolve the rewritten manifests. Verified locally with Bun 1.2.13.
+for lockfile in bun.lock bun.lockb bun.lock.json; do
+    if [ -f "$lockfile" ]; then
+        echo ">>> Removing $lockfile (Bun 1.2.13 cannot resolve catalog: entries)"
+        rm -f "$lockfile"
+    fi
+done
+
+"$HOST_BUN" install
+
+# One resolution pass for all OpenTUI variants. The workflow caches Bun's
+# install cache; --no-cache forced a fresh network fetch on every run.
+# Non-host @opentui/core-* imports are redirected by a Bun build plugin in
+# build-opencode-android.ts (Bun 1.3.x installs workspace dependencies in an
+# isolated layout, so node_modules stubs would not be resolvable anyway).
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"
@@ -208,46 +228,9 @@ if [ -n "$ARM64_LIBOPENTUI" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
     echo "    libopentui.so architecture and dependencies verified OK"
 fi
 
-# Find x86_64 libopentui.so in node_modules and swap it
-# OpenCode uses @opentui/core-linux-x64 which has the x86_64 version
-OPENTUI_NODE_MODULE=""
-for candidate in \
-    "$OPENCODE_SRC_ABS/node_modules/@opentui/core-linux-x64/libopentui.so" \
-    "$OPENCODE_PKG/node_modules/@opentui/core-linux-x64/libopentui.so" \
-    "$OPENCODE_SRC_ABS/node_modules/.bun/@opentui+core-linux-x64@*/node_modules/@opentui/core-linux-x64/libopentui.so"
-do
-    # Handle glob
-    for f in $candidate; do
-        if [ -f "$f" ]; then
-            OPENTUI_NODE_MODULE="$f"
-            break 2
-        fi
-    done
-done
-
-BACKUP_FILE=""
-if [ -n "$OPENTUI_NODE_MODULE" ]; then
-    echo ">>> Swapping x86_64 libopentui.so with ARM64 version..."
-    if [ -n "$ARM64_LIBOPENTUI" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
-        BACKUP_FILE="${OPENTUI_NODE_MODULE}.x64.bak"
-        cp "$OPENTUI_NODE_MODULE" "$BACKUP_FILE"
-        cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
-        echo "    Backed up to $BACKUP_FILE"
-        # Verify the swap
-        echo "    Verifying swapped libopentui.so..."
-        file "$OPENTUI_NODE_MODULE" | grep -q "aarch64" || {
-            echo "ERROR: Swapped libopentui.so is not ARM64 architecture"
-            file "$OPENTUI_NODE_MODULE"
-            exit 1
-        }
-        echo "    Swap verified OK"
-    else
-        echo "WARNING: No ARM64 libopentui.so available; keeping x86_64 version"
-    fi
-else
-    echo "WARNING: Could not find x86_64 libopentui.so in node_modules"
-    echo "         The build may embed the wrong architecture"
-fi
+# The ARM64 library is not embedded through @opentui/core-linux-x64: the arm64
+# platform stub resolves $OPENTUI_LIB_PATH at runtime, and the launcher exports
+# it from the packaged lib/ directory. Nothing to swap here.
 
 # Create dist directory
 mkdir -p "$DIST_DIR_ABS"
@@ -270,21 +253,123 @@ OPENCODE_VERSION="$OPENCODE_VERSION" \
 # Clean up copied script
 rm -f "$BUILD_SCRIPT_LOCAL"
 
-# Restore original libopentui.so
-if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
-    echo ">>> Restoring original x86_64 libopentui.so..."
-    mv "$BACKUP_FILE" "$OPENTUI_NODE_MODULE"
+
+# ---------------------------------------------------------------------------
+# Stage the Termux $PREFIX layout:
+#   bin/opencode                     launcher
+#   libexec/opencode/opencode.bin    actual ELF (Bun runtime + module graph)
+#   lib/*.so*                        libopentui.so, libc++_shared.so, libtagfix.so
+# ---------------------------------------------------------------------------
+echo ">>> Transplanting module graph onto the Android Bun runtime..."
+BIN_DIR="$DIST_DIR_ABS/bin"
+LIBEXEC_DIR="$DIST_DIR_ABS/libexec/opencode"
+LIB_DIR="$DIST_DIR_ABS/lib"
+mkdir -p "$BIN_DIR" "$LIBEXEC_DIR" "$LIB_DIR"
+
+TRANSPLANT_ARGS=(transplant
+    --host "$DIST_DIR_ABS/opencode-host"
+    --bun "$ANDROID_BUN"
+    --output "$LIBEXEC_DIR/opencode.bin")
+if [ -n "${MODULE_GRAPH_STRIDE:-}" ]; then
+    TRANSPLANT_ARGS+=(--expect-stride "$MODULE_GRAPH_STRIDE")
+fi
+python3 "$REPO_ROOT/scripts/transplant-bun-graph.py" "${TRANSPLANT_ARGS[@]}"
+
+# Launcher placed in $PREFIX/bin; it locates the real binary and the native libs
+# both for an installed package and for an extracted zip.
+cat > "$BIN_DIR/opencode" <<'WRAPPER'
+#!/data/data/com.termux/files/usr/bin/sh
+# opencode - launcher for the OpenCode CLI on Android/Termux
+#
+# Layout this script understands:
+#   installed:  $PREFIX/bin/opencode, $PREFIX/libexec/opencode/opencode.bin,
+#               $PREFIX/lib/libopentui.so
+#   zip:        bin/opencode, libexec/opencode/opencode.bin, lib/libopentui.so
+set -eu
+
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+DIR="$(CDPATH= cd -- "$(dirname "$SELF")" && pwd)"
+PREFIX="${PREFIX:-$(CDPATH= cd -- "$DIR/.." && pwd)}"
+export PREFIX
+
+# Native renderer library. OPENTUI_LIB_PATH is what @opentui/core consults;
+# LD_LIBRARY_PATH covers DT_NEEDED lookups such as libc++_shared.so.
+for candidate in "$PREFIX/lib" "$PREFIX/libexec/opencode" "$DIR/lib"; do
+    if [ -f "$candidate/libopentui.so" ]; then
+        export OPENTUI_LIB_PATH="$candidate/libopentui.so"
+        export LD_LIBRARY_PATH="$candidate${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        break
+    fi
+done
+
+for candidate in "$PREFIX/libexec/opencode/opencode.bin" "$DIR/../libexec/opencode/opencode.bin" "$DIR/opencode.bin"; do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+
+echo "opencode: error: could not find opencode.bin (reinstall the package)" >&2
+exit 127
+WRAPPER
+chmod 755 "$BIN_DIR/opencode"
+
+# Native libraries
+OPENTUI_LIB_SRC="$WEBKIT_OUTPUT_ABS/lib/libopentui.so"
+if [ ! -f "$OPENTUI_LIB_SRC" ]; then
+    echo "ERROR: libopentui.so not found at $OPENTUI_LIB_SRC"
+    echo "       Run scripts/build-opentui.sh first."
+    exit 1
+fi
+cp "$OPENTUI_LIB_SRC" "$LIB_DIR/libopentui.so"
+
+CXX_SHARED=""
+for candidate in \
+    "$NDK_SYSROOT/usr/lib/$ANDROID_TRIPLE/libc++_shared.so" \
+    "$NDK_SYSROOT/usr/lib/$ANDROID_TRIPLE_API/libc++_shared.so"
+do
+    if [ -f "$candidate" ]; then
+        CXX_SHARED="$candidate"
+        cp "$CXX_SHARED" "$LIB_DIR/libc++_shared.so"
+        break
+    fi
+done
+if [ -z "$CXX_SHARED" ]; then
+    echo "WARNING: libc++_shared.so not found in the NDK sysroot; not packaged"
 fi
 
-# Verify output
-OPENCODE_BINARY="$DIST_DIR_ABS/opencode"
-if [ ! -f "$OPENCODE_BINARY" ]; then
-    echo "ERROR: OpenCode binary not found at $OPENCODE_BINARY"
-    exit 1
+# libtagfix.so is supplied out-of-band; it is only packaged when present.
+if [ -f "$WORK_DIR_ABS/libtagfix.so" ]; then
+    cp "$WORK_DIR_ABS/libtagfix.so" "$LIB_DIR/libtagfix.so"
+else
+    echo "NOTE: no libtagfix.so in $WORK_DIR_ABS; nothing to package"
+fi
+
+chmod 755 "$LIBEXEC_DIR/opencode.bin"
+chmod 644 "$LIB_DIR"/*.so*
+
+# ---------------------------------------------------------------------------
+# Verify the finished artifact
+# ---------------------------------------------------------------------------
+echo ">>> Verifying standalone binary..."
+VERIFY_ARGS=(verify "$LIBEXEC_DIR/opencode.bin")
+if [ -n "${MODULE_GRAPH_STRIDE:-}" ]; then
+    VERIFY_ARGS+=(--expect-stride "$MODULE_GRAPH_STRIDE")
+fi
+python3 "$REPO_ROOT/scripts/transplant-bun-graph.py" "${VERIFY_ARGS[@]}"
+
+if command -v file >/dev/null 2>&1; then
+    file "$LIBEXEC_DIR/opencode.bin"
+    file "$LIB_DIR/libopentui.so"
 fi
 
 echo ""
 echo "=== OpenCode build complete ==="
-echo "Binary: $OPENCODE_BINARY"
-echo "Size: $(du -h "$OPENCODE_BINARY" | cut -f1)"
-file "$OPENCODE_BINARY"
+echo "Launcher: $BIN_DIR/opencode"
+echo "Binary:   $LIBEXEC_DIR/opencode.bin ($(du -h "$LIBEXEC_DIR/opencode.bin" | cut -f1))"
+echo "Libraries:"
+ls -lh "$LIB_DIR"
+echo ""
+echo "Install into a Termux prefix with:"
+echo "  cp -a $DIST_DIR_ABS/bin/. \"\$PREFIX/bin/\""
+echo "  cp -a $DIST_DIR_ABS/libexec/. \"\$PREFIX/libexec/\""
+echo "  cp -a $DIST_DIR_ABS/lib/. \"\$PREFIX/lib/\""

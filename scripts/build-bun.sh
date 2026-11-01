@@ -52,11 +52,15 @@ fi
 #
 # Fix: Symlink .zig-cache -> the explicit cache dir so both paths resolve to
 # the same physical location. Clear both first to avoid stale entries.
-echo ">>> Setting up Zig cache directories..."
-rm -rf "$BUN_BUILD_ABS/cache/zig" "$BUN_SRC_ABS/.zig-cache"
-mkdir -p "$BUN_BUILD_ABS/cache/zig/local"
-mkdir -p "$BUN_BUILD_ABS/cache/zig/global"
-ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
+ZIG_CACHE_ROOT="${ZIG_CACHE_ROOT:-$BUN_BUILD_ABS/cache/zig}"
+echo ">>> Setting up Zig cache directories at $ZIG_CACHE_ROOT..."
+if [ "${ZIG_CACHE_REUSE:-false}" = "true" ] && [ -d "$ZIG_CACHE_ROOT/local" ]; then
+    echo "    Reusing cache restored by the workflow"
+else
+    rm -rf "$ZIG_CACHE_ROOT" "$BUN_SRC_ABS/.zig-cache"
+fi
+mkdir -p "$ZIG_CACHE_ROOT/local" "$ZIG_CACHE_ROOT/global"
+ln -sfn "$ZIG_CACHE_ROOT/local" "$BUN_SRC_ABS/.zig-cache"
 echo "    Symlinked $BUN_SRC_ABS/.zig-cache -> $BUN_BUILD_ABS/cache/zig/local"
 
 # Create build directory
@@ -103,6 +107,10 @@ if [ -f "$ZIG_POSIX" ]; then
     if patch --dry-run -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" >/dev/null 2>&1; then
         patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch"
         echo "    Zig patch applied successfully."
+        grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" || {
+            echo "ERROR: Zig patch applied but marker missing" >&2
+            exit 1
+        }
     else
         # Check if already applied by looking for the Android bypass code
         if grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" 2>/dev/null; then
@@ -111,6 +119,10 @@ if [ -f "$ZIG_POSIX" ]; then
             echo "WARNING: Zig patch doesn't match cleanly. Trying with --fuzz..."
             patch -p1 --fuzz=3 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" || {
                 echo "ERROR: Could not apply Zig patch. Manual intervention required."
+                exit 1
+            }
+            grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" || {
+                echo "ERROR: Zig patch applied with fuzz but marker missing" >&2
                 exit 1
             }
         fi
@@ -133,14 +145,18 @@ ninja -j"$JOBS" 2>&1 || {
     if [ -f "$ZIG_POSIX" ] && ! grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" 2>/dev/null; then
         echo ">>> Zig downloaded during build but patch not applied. Applying now..."
         cd "$BUN_SRC_ABS"
-        patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" || {
+        patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" || {  # lint:allow-repeat-application
             echo "ERROR: Zig patch failed to apply"
             exit 1
         }
         echo "    Zig patch applied. Clearing Zig cache and rebuilding..."
-        rm -rf "$BUN_BUILD_ABS/cache/zig" "$BUN_SRC_ABS/.zig-cache"
-        mkdir -p "$BUN_BUILD_ABS/cache/zig/local" "$BUN_BUILD_ABS/cache/zig/global"
-        ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
+        grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" || {
+            echo "ERROR: Zig patch applied but marker missing" >&2
+            exit 1
+        }
+        rm -rf "$ZIG_CACHE_ROOT" "$BUN_SRC_ABS/.zig-cache"
+        mkdir -p "$ZIG_CACHE_ROOT/local" "$ZIG_CACHE_ROOT/global"
+        ln -sfn "$ZIG_CACHE_ROOT/local" "$BUN_SRC_ABS/.zig-cache"
         cd "$BUN_BUILD_ABS"
         ninja -j"$JOBS"
     else

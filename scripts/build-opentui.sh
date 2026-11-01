@@ -36,7 +36,7 @@ else
 fi
 
 # Android bionic sysroot + zig libc config (required by v2-0.5.10-android.patch
-# bionicSysrootInclude()/bionicSysrootLib() and android-libc-link.patch)
+# bionicSysrootInclude()/bionicSysrootLib())
 export BIONIC_SYSROOT_INC="${WORK_DIR_ABS}/bionic-include"
 export ZIG_LIBC="${WORK_DIR_ABS}/bionic-libc.txt"
 export ANDROID_NDK_LIB_DIR="${NDK_SYSROOT}/usr/lib/${ANDROID_TRIPLE}/${ANDROID_API}"
@@ -58,30 +58,64 @@ fi
 
 # Apply the opentui Android patch (adds aarch64-linux-android library target,
 # bionic sysroot handling, pthread/m guards for android)
-OPENTUI_PATCH="$REPO_ROOT/patches/opentui/v2-0.5.10-android.patch"
-if [ -f "$OPENTUI_PATCH" ]; then
-    echo ">>> Applying opentui Android patch..."
-    cd "$OPENTUI_SRC_ABS"
-    if ! git apply --check "$OPENTUI_PATCH" 2>/dev/null; then
-        echo "    Patch already applied or does not apply cleanly, skipping"
-    else
-        git apply "$OPENTUI_PATCH"
-        echo "    Patch applied successfully"
-    fi
-fi
+# Apply a git-format patch and prove it took effect. Upstream context moves, and a
+# patch that silently fails leaves an unpatched vendor tree that only breaks much
+# later in the build (docs section 24).
+apply_verified_patch() {
+    local dir="$1" patch_file="$2" target_rel="$3" marker="$4" label="$5"
 
-# Apply android-libc-link.patch (links NDK libc.so stub so .so has NEEDED libc.so)
-ANDROID_LIBC_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
-if [ -f "$ANDROID_LIBC_PATCH" ]; then
-    echo ">>> Applying android-libc-link.patch..."
-    cd "$OPENTUI_SRC_ABS"
-    if ! git apply --check "$ANDROID_LIBC_PATCH" 2>/dev/null; then
-        echo "    Patch already applied or does not apply cleanly, skipping"
-    else
-        git apply "$ANDROID_LIBC_PATCH"
-        echo "    Patch applied successfully"
+    if [ ! -f "$patch_file" ]; then
+        echo "ERROR: $label patch not found: $patch_file" >&2
+        exit 1
     fi
-fi
+
+    # `git apply` resolves patch paths from the worktree root of the repository
+    # that encloses the current directory, not from the current directory. The
+    # ghostty tree is extracted into build/ inside this project but is not a
+    # repository, so without this Git resolved "src/build/SharedDeps.zig"
+    # against opencode-termux, printed "Skipped patch ...", and still exited 0.
+    # Give every vendor tree its own repository so patch paths are relative to
+    # it. (docs section 11.4b)
+    if [ ! -d "$dir/.git" ]; then
+        git -C "$dir" init -q
+    fi
+
+    local apply_output=""
+    if (cd "$dir" && git apply --check "$patch_file" 2>/dev/null); then
+        apply_output="$(cd "$dir" && git apply --verbose "$patch_file" 2>&1)"
+        echo "    $label: applied"
+    elif (cd "$dir" && git apply -R --check "$patch_file" 2>/dev/null); then
+        echo "    $label: already applied"
+    else
+        echo "ERROR: $label patch does not apply to $dir" >&2
+        (cd "$dir" && git apply --stat "$patch_file") >&2 || true
+        exit 1
+    fi
+
+    # A skipped hunk exits 0. Belt and braces beside the repository init above.
+    if [[ "$apply_output" == *"Skipped patch"* ]]; then
+        echo "ERROR: $label patch was skipped in $dir" >&2
+        printf '%s\n' "$apply_output" >&2
+        exit 1
+    fi
+
+    if ! grep -qF -- "$marker" "$dir/$target_rel"; then
+        echo "ERROR: $label patch did not take effect in $target_rel" >&2
+        echo "       expected marker: $marker" >&2
+        exit 1
+    fi
+}
+
+OPENTUI_PATCH="$REPO_ROOT/patches/opentui/v2-0.5.10-android.patch"
+echo ">>> Applying opentui Android patch..."
+apply_verified_patch "$OPENTUI_SRC_ABS" "$OPENTUI_PATCH" \
+    "packages/native/build.zig" "fn bionicSysrootInclude" "opentui android"
+
+# The old android-libc-link.patch is retired: its target
+# packages/core/src/zig/build.zig does not exist in OpenTUI 0.5.10, and the native
+# build already sets module.link_libc = true. The NEEDED libc.so postcondition is
+# enforced by the readelf check after the build.
+
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC_ABS/packages/native"
 OPENTUI_ZIG_DEPS="$OPENTUI_ZIG_DIR/zig-deps"
@@ -113,8 +147,11 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-opentui" ]; then
     rm -f "$WORK_DIR_ABS/uucode-opentui.tar.gz"
 fi
 
-# ghostty build.zig.zon depends on uucode-ghostty
-if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-ghostty" ]; then
+# ghostty build.zig.zon depends on uucode-ghostty. Test for a file inside the
+# package, not for the directory: the workflow used to `mkdir -p` this path as
+# a legacy workaround for the old stub, so a `-d` guard skipped the extraction
+# and left Zig with only the two build files (run 41280659177).
+if [ ! -f "$OPENTUI_ZIG_DEPS/uucode-ghostty/src/ucd_inputs.zig" ]; then
     echo ">>> Downloading uucode-ghostty zig dependency..."
     curl -fsSL "https://github.com/jacobsandlund/uucode/archive/9d55524551411b493cca41ca06363625d90aff1e.tar.gz" -o "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
     mkdir -p "$OPENTUI_ZIG_DEPS/uucode-ghostty"
@@ -122,7 +159,15 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-ghostty" ]; then
     rm -f "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
 fi
 
-# Create build.zig for uucode-ghostty (always recreate to ensure correct content)
+# uucode-ghostty must be the real uucode package, not a hand-written stub.
+# ghostty's SharedDeps.init asks the dependency for `.build_config_path`,
+# `namedLazyPath("tables.zig")` and `module("uucode")`; only uucode's own
+# build.zig declares those options and named paths. The stub that used to live
+# here accepted only the standard options, so run 41280310141 failed with
+# "invalid option: -Dbuild_config_path" and "unable to find named lazypath
+# 'tables.zig'". The archive is already pinned by commit, so re-fetching the
+# build files from that same commit keeps them from drifting.
+UUCODE_GHOSTTY_COMMIT="9d55524551411b493cca41ca06363625d90aff1e"
 UUCOD_GHOSTTY_BUILD="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig"
 echo ">>> Creating build.zig for uucode-ghostty..."
 cat > "$UUCOD_GHOSTTY_BUILD" <<'ZIG_EOF'
@@ -147,16 +192,34 @@ ZIG_EOF
 
 # Create build.zig.zon for uucode-ghostty (always recreate to ensure correct content)
 UUCOD_GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig.zon"
-echo ">>> Creating build.zig.zon for uucode-ghostty..."
-cat > "$UUCOD_GHOSTTY_ZON" <<'ZON_EOF'
-.{
-    .name = .uucode,
-    .version = "0.1.0",
-    .fingerprint = 0x8d4ebdea5541ef31,
-    .paths = .{"src"},
-    .dependencies = .{},
-}
-ZON_EOF
+echo ">>> Installing upstream build files for uucode-ghostty..."
+for build_file in build.zig build.zig.zon; do
+    curl -fsSL "https://raw.githubusercontent.com/jacobsandlund/uucode/${UUCODE_GHOSTTY_COMMIT}/${build_file}" \
+        -o "$OPENTUI_ZIG_DEPS/uucode-ghostty/${build_file}"
+done
+
+# Validate the dependency interface before spending time on the real build. A
+# Zig API mismatch fails here instead of as an opaque "Build libopentui.so"
+# failure (see docs section 24).
+echo ">>> Validating uucode-ghostty/build.zig..."
+if ! UUCODE_HELP="$(cd "$OPENTUI_ZIG_DEPS/uucode-ghostty" && "$ZIG_BIN_ABS" build --help 2>&1)"; then
+    echo "ERROR: uucode-ghostty/build.zig does not evaluate with $( "$ZIG_BIN_ABS" version )."
+    echo "       This is a Zig build API change, not a network or NDK problem."
+    printf '%s\n' "$UUCODE_HELP" | head -20 >&2 || true
+    exit 1
+fi
+for option in build_config_path tables_path; do
+    if ! grep -qF -- "-D${option}" <<<"$UUCODE_HELP"; then
+        echo "ERROR: uucode-ghostty/build.zig no longer declares -D${option}." >&2
+        echo "       ghostty's SharedDeps.init passes it; update the pinned uucode commit." >&2
+        exit 1
+    fi
+done
+if ! grep -qF 'addNamedLazyPath("tables.zig"' "$UUCOD_GHOSTTY_BUILD"; then
+    echo "ERROR: uucode-ghostty/build.zig no longer exports named lazypath tables.zig." >&2
+    echo "       ghostty's SharedDeps.init requires it; update the pinned uucode commit." >&2
+    exit 1
+fi
 
 if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     echo ">>> Downloading ghostty zig dependency..."
@@ -170,45 +233,77 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     rm -rf "$OPENTUI_ZIG_DEPS/ghostty/src/font/res"
     cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/android-ndk" "$OPENTUI_ZIG_DEPS/ghostty/pkg/android-ndk"
     cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/apple-sdk" "$OPENTUI_ZIG_DEPS/ghostty/pkg/apple-sdk"
+    # Kitty graphics is enabled for lib artifacts on Android, and GhosttyZig
+    # wires wuffs in for it; the wuffs shim itself imports translate-c. SIMD is
+    # enabled too, and addSimd unconditionally asks for simdutf and highway.
+    # All four path dependencies must be present (runs 41281095820 and later).
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/translate-c" "$OPENTUI_ZIG_DEPS/ghostty/pkg/translate-c"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/wuffs" "$OPENTUI_ZIG_DEPS/ghostty/pkg/wuffs"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/highway" "$OPENTUI_ZIG_DEPS/ghostty/pkg/highway"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/simdutf" "$OPENTUI_ZIG_DEPS/ghostty/pkg/simdutf"
     # Custom ghostty build files from opentui vendor
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig"
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig.zon" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
-    curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-shared-deps.patch" -o "$WORK_DIR_ABS/ghostty-shared-deps.patch"
-    (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$WORK_DIR_ABS/ghostty-shared-deps.patch") || true
-    # Apply additional patch to skip metallib for non-Apple targets (Android)
+    GHOSTTY_SHARED_DEPS_PATCH="$WORK_DIR_ABS/ghostty-shared-deps.patch"
+    curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-shared-deps.patch" -o "$GHOSTTY_SHARED_DEPS_PATCH"
+    apply_verified_patch "$OPENTUI_ZIG_DEPS/ghostty" "$GHOSTTY_SHARED_DEPS_PATCH" \
+        "src/build/SharedDeps.zig" ".framedata = undefined," "ghostty shared-deps"
+
+    # Skip the Metal shader library on Android. This patch carries only the guard
+    # hunk; the framedata change above comes from the shared-deps patch.
     GHOSTTY_METALLIB_PATCH="$REPO_ROOT/patches/opentui/ghostty-android-metallib.patch"
-    if [ -f "$GHOSTTY_METALLIB_PATCH" ]; then
-        echo ">>> Applying ghostty Android metallib patch..."
-        (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$GHOSTTY_METALLIB_PATCH") || true
-    fi
+    echo ">>> Applying ghostty Android metallib patch..."
+    apply_verified_patch "$OPENTUI_ZIG_DEPS/ghostty" "$GHOSTTY_METALLIB_PATCH" \
+        "src/build/SharedDeps.zig" "Only create metallib for Apple targets" "ghostty metallib"
     rm -rf "$WORK_DIR_ABS/ghostty-staging" "$WORK_DIR_ABS/ghostty.tar.gz" "$WORK_DIR_ABS/ghostty-shared-deps.patch"
 fi
 
 # Ensure uucode-ghostty directory exists (from reference guide)
 mkdir -p "$OPENTUI_ZIG_DEPS/uucode-ghostty"
 
-# Patch ghostty build.zig.zon for zlib dependency (from reference guide)
+# Patch ghostty build.zig.zon: the manifest vendored by OpenTUI omits ghostty's
+# own path dependencies. GhosttyZig.initVt needs wuffs whenever Kitty graphics
+# is enabled, which it is for lib artifacts on Android (only freestanding
+# targets force it off), and the wuffs shim imports translate-c (run
+# 41281095820). zlib is URL-pinned because the vendored zon has no pkg/zlib
+# entry; zlib.net served the runner HTML, so the GitHub release asset is used
+# instead (same bytes, verified with `zig fetch`).
 GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
 if [ -f "$GHOSTTY_ZON" ]; then
-    if ! grep -q "zlib" "$GHOSTTY_ZON"; then
-        echo ">>> Patching ghostty build.zig.zon for zlib..."
-        python3 - "$GHOSTTY_ZON" <<'PYEOF'
+    echo ">>> Patching ghostty build.zig.zon with vendored dependencies..."
+    python3 - "$GHOSTTY_ZON" <<'PYEOF'
 import sys
+
 zon_path = sys.argv[1]
 with open(zon_path, "r") as f:
     content = f.read()
-zlib_dep = """
-    .zlib = .{
-        .url = "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
-        .hash = "N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8",
-    },
-"""
-content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)
-with open(zon_path, "w") as f:
-    f.write(content)
-print("Patched ghostty build.zig.zon with zlib dependency")
+
+deps = {
+    "wuffs": '    .wuffs = .{ .path = "./pkg/wuffs", .lazy = true },\n',
+    "simdutf": '    .simdutf = .{ .path = "./pkg/simdutf", .lazy = true },\n',
+    "highway": '    .highway = .{ .path = "./pkg/highway", .lazy = true },\n',
+    "translate_c": '    .translate_c = .{ .path = "./pkg/translate-c" },\n',
+    "zlib": (
+        '    .zlib = .{\n'
+        '        .url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",\n'
+        '        .hash = "N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8",\n'
+        '    },\n'
+    ),
+}
+
+missing = [name for name in deps if f".{name} = " not in content]
+if missing:
+    marker = ".dependencies = .{"
+    if marker not in content:
+        print("ERROR: ghostty build.zig.zon has no dependencies block", file=sys.stderr)
+        sys.exit(1)
+    content = content.replace(marker, marker + "".join(deps[name] for name in missing), 1)
+    with open(zon_path, "w") as f:
+        f.write(content)
+    print("Added ghostty dependencies: " + ", ".join(missing))
+else:
+    print("ghostty dependencies already present")
 PYEOF
-    fi
 fi
 
 # Create merged bionic sysroot with shimmed C headers (required by the
@@ -253,10 +348,12 @@ cd "$OPENTUI_ZIG_DIR"
 # Clean any previous build artifacts for this target
 rm -rf "$OPENTUI_ZIG_DIR/lib/aarch64-linux-android"
 
+# OpenTUI 0.5.10 does not declare a -Dstrip option; passing it makes Zig
+# reject the whole invocation (run 41281508898). ReleaseSafe output is left
+# unstripped here and stripped when the packages are assembled.
 "$ZIG_BIN_ABS" build \
     -Dlibrary-target=aarch64-linux-android \
     -Doptimize=ReleaseSafe \
-    -Dstrip=true \
     2>&1
 
 # The build installs shared library to ../lib/{output_name} relative to

@@ -44,7 +44,7 @@ This repository cross-compiles OpenCode for Android/Termux (aarch64) using GitHu
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Bun | 1.2.13 | Host + target; must match for module graph compatibility |
+| Bun | 1.3.2 host / 1.2.13 target | Host needs `Bun.build({compile})`; 1.3.2's 32-byte Offsets are down-converted to the 24-byte form 1.2.13 reads |
 | Zig | 0.16.0 | Builds `libopentui.so` |
 | Android NDK | r28b | API 24, aarch64-linux-android |
 | WebKit/JSC | 017930ebf9 | Bundled in Bun |
@@ -54,17 +54,17 @@ This repository cross-compiles OpenCode for Android/Termux (aarch64) using GitHu
 ## Common Failure Modes & Fixes
 
 ### 1. `@types/bun` git clone failure in CI
-**Symptom**: `error: "git clone" for "@types/bun" failed`
-**Fix**: Pre-install globally in workflow before `bun install`:
-```yaml
-- run: bun add -g @types/bun@1.2.13
-```
+**Symptom**: `error: "git clone" for "@types/bun" failed` (or `@types/node`)
+**Root cause**: Bun 1.2.13 cannot parse the `catalog:` entries in OpenCode's `bun.lock`
+and treats the unknown protocol as a Git spec. Rewriting `package.json` alone is not enough.
+**Fix**: `build-opencode.sh` deletes `bun.lock`/`bun.lockb` before `bun install`; the global
+`@types/bun` pre-install in the workflow is only a belt-and-braces measure.
 
 ### 2. ARM64 `libopentui.so` missing or wrong architecture
 **Symptom**: `WARNING: ARM64 libopentui.so not found... keeping x86_64 version`
 **Root cause**: Zig build didn't produce ARM64 artifact, or path mismatch
 **Fix**: 
-- Build with `-Dlibrary-target=aarch64-linux-android -Doptimize=ReleaseSafe -Dstrip=true`
+- Build with `-Dlibrary-target=aarch64-linux-android -Doptimize=ReleaseSafe` (OpenTUI 0.5.10 has no `strip` option)
 - Verify output at `packages/native/lib/aarch64-linux-android/libopentui.so`
 - Copy to `packages/core/src/lib/aarch64-linux-android/` and `webkit-android/lib/`
 - Verify with `file` (must show `aarch64`) and `readelf -d` (must have `NEEDED libc.so`)
@@ -87,6 +87,13 @@ rm -rf "$BUN_BUILD_ABS/cache/zig" "$BUN_SRC_ABS/.zig-cache"
 ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
 ```
 
+### 5. OpenCode bundler cannot resolve the TUI worker or @opentui platform packages
+**Symptom**: `ModuleNotFound resolving .../src/cli/cmd/tui/worker.ts` or `Could not resolve: "@opentui/core-darwin-x64"`
+**Root cause**: OpenCode 1.19.4 moved the worker to `src/cli/tui/worker.ts`; `bun add` will not unpack
+platform packages whose `os`/`cpu` do not match the runner, but the bundler resolves every literal import.
+**Fix**: `build-opencode-android.ts` uses the new worker path and redirects the seven non-host
+`@opentui/core-*` imports with a Bun.build plugin that returns `OPENTUI_LIB_PATH` at runtime.
+
 ## Build Order (must be sequential)
 
 1. **ICU** → `scripts/build-icu.sh`
@@ -94,7 +101,7 @@ ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
 3. **TinyCC** → `scripts/build-tinycc.sh`
 4. **Bun** → `scripts/build-bun.sh` (needs WebKit, TinyCC)
 5. **libopentui.so** → `scripts/build-opentui.sh` (needs Zig, NDK)
-6. **OpenCode binary** → `scripts/build-opencode.sh` (needs Bun, libopentui.so)
+6. **OpenCode binary** → `scripts/build-opencode.sh` (needs Bun, libopentui.so; emits `dist/{bin,libexec,lib}`)
 7. **Packages** → `scripts/make-packages.sh`
 
 ## Environment Setup
@@ -130,9 +137,11 @@ file build/bun-build/bun | grep aarch64
 file build/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so
 readelf -d build/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so | grep NEEDED
 
-# Verify final OpenCode binary
-file build/dist/opencode
-readelf -h build/dist/opencode | grep -E "Machine|Class"
+# Verify final OpenCode binary and its embedded module graph
+file build/dist/libexec/opencode/opencode.bin
+readelf -h build/dist/libexec/opencode/opencode.bin | grep -E "Machine|Class"
+python3 scripts/lint-patch-application.py
+python3 scripts/transplant-bun-graph.py verify build/dist/libexec/opencode/opencode.bin --expect-stride 36
 ```
 
 ## Patches Applied
@@ -141,4 +150,3 @@ readelf -h build/dist/opencode | grep -E "Machine|Class"
 - `patches/webkit/android-support.patch` — JSCOnly Android build fixes
 - `patches/zig/posix-android-sigaction.patch` — Bionic sigaction/sigprocmask bypass
 - `patches/opentui/v2-0.5.10-android.patch` — aarch64-linux-android target, bionic sysroot, u32 bounds checks
-- `patches/opentui/android-libc-link.patch` — Links NDK libc.so stub for `NEEDED libc.so`
