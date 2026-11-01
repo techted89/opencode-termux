@@ -129,15 +129,10 @@ cat > "$UUCOD_GHOSTTY_BUILD" <<'ZIG_EOF'
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
     const lib = b.addLibrary(.{
         .name = "uucode",
         .version = "0.1.0",
         .root_module = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
         .linkage = .dynamic,
     });
 
