@@ -179,13 +179,32 @@ done
 
 # One resolution pass for all OpenTUI variants. The workflow caches Bun's
 # install cache; --no-cache forced a fresh network fetch on every run.
-echo ">>> Installing OpenTUI native packages..."
-"$HOST_BUN" add -D \
-    @opentui/core-linux-arm64@0.5.10 \
-    @opentui/core-linux-x64@0.5.10 \
-    @opentui/core-linux-arm64-musl@0.5.10 \
-    @opentui/core-linux-x64-musl@0.5.10 \
-    2>/dev/null || true
+# Bun 1.2.13 records platform-specific optional packages but refuses to unpack
+# ones whose "os"/"cpu" do not match the runner, so `bun add
+# @opentui/core-linux-arm64` silently leaves node_modules empty on x86_64. The
+# bundler still resolves every literal dynamic import in @opentui/core's platform
+# loader, so provide a resolvable module for the platforms this build does not
+# run on. The arm64 stub returns $OPENTUI_LIB_PATH at runtime; the launcher sets
+# that to the packaged libopentui.so. The host's linux-x64 package stays real.
+OPENTUI_CORE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
+    "$OPENCODE_SRC_ABS/node_modules/@opentui/core/package.json")"
+echo ">>> Creating @opentui/core platform stubs (core ${OPENTUI_CORE_VERSION})..."
+for platform in darwin-x64 darwin-arm64 linux-arm64 linux-x64-musl linux-arm64-musl win32-x64 win32-arm64; do
+    stub_dir="$OPENCODE_SRC_ABS/node_modules/@opentui/core-${platform}"
+    mkdir -p "$stub_dir"
+    printf 'export default process.env.OPENTUI_LIB_PATH || ""\n' > "$stub_dir/index.js"
+    cp "$stub_dir/index.js" "$stub_dir/index.bun.js"
+    cat > "$stub_dir/package.json" <<STUB
+{
+  "name": "@opentui/core-${platform}",
+  "version": "${OPENTUI_CORE_VERSION}",
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "exports": { ".": { "bun": "./index.bun.js", "import": "./index.js" } }
+}
+STUB
+done
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"
@@ -232,46 +251,9 @@ if [ -n "$ARM64_LIBOPENTUI" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
     echo "    libopentui.so architecture and dependencies verified OK"
 fi
 
-# Find x86_64 libopentui.so in node_modules and swap it
-# OpenCode uses @opentui/core-linux-x64 which has the x86_64 version
-OPENTUI_NODE_MODULE=""
-for candidate in \
-    "$OPENCODE_SRC_ABS/node_modules/@opentui/core-linux-x64/libopentui.so" \
-    "$OPENCODE_PKG/node_modules/@opentui/core-linux-x64/libopentui.so" \
-    "$OPENCODE_SRC_ABS/node_modules/.bun/@opentui+core-linux-x64@*/node_modules/@opentui/core-linux-x64/libopentui.so"
-do
-    # Handle glob
-    for f in $candidate; do
-        if [ -f "$f" ]; then
-            OPENTUI_NODE_MODULE="$f"
-            break 2
-        fi
-    done
-done
-
-BACKUP_FILE=""
-if [ -n "$OPENTUI_NODE_MODULE" ]; then
-    echo ">>> Swapping x86_64 libopentui.so with ARM64 version..."
-    if [ -n "$ARM64_LIBOPENTUI" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
-        BACKUP_FILE="${OPENTUI_NODE_MODULE}.x64.bak"
-        cp "$OPENTUI_NODE_MODULE" "$BACKUP_FILE"
-        cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
-        echo "    Backed up to $BACKUP_FILE"
-        # Verify the swap
-        echo "    Verifying swapped libopentui.so..."
-        file "$OPENTUI_NODE_MODULE" | grep -q "aarch64" || {
-            echo "ERROR: Swapped libopentui.so is not ARM64 architecture"
-            file "$OPENTUI_NODE_MODULE"
-            exit 1
-        }
-        echo "    Swap verified OK"
-    else
-        echo "WARNING: No ARM64 libopentui.so available; keeping x86_64 version"
-    fi
-else
-    echo "WARNING: Could not find x86_64 libopentui.so in node_modules"
-    echo "         The build may embed the wrong architecture"
-fi
+# The ARM64 library is not embedded through @opentui/core-linux-x64: the arm64
+# platform stub resolves $OPENTUI_LIB_PATH at runtime, and the launcher exports
+# it from the packaged lib/ directory. Nothing to swap here.
 
 # Create dist directory
 mkdir -p "$DIST_DIR_ABS"
@@ -294,11 +276,6 @@ OPENCODE_VERSION="$OPENCODE_VERSION" \
 # Clean up copied script
 rm -f "$BUILD_SCRIPT_LOCAL"
 
-# Restore original libopentui.so
-if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
-    echo ">>> Restoring original x86_64 libopentui.so..."
-    mv "$BACKUP_FILE" "$OPENTUI_NODE_MODULE"
-fi
 
 # ---------------------------------------------------------------------------
 # Stage the Termux $PREFIX layout:

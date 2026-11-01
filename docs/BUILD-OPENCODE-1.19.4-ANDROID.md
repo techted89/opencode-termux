@@ -29,7 +29,11 @@ built, verified and cached ICU 75.1, WebKit/JSC, TinyCC and the Android Bun bina
 failure is now in the last stage, `Build OpenCode standalone binary`: `bun install` aborts
 with `"git clone" for "@types/bun" failed` because Bun 1.2.13 cannot parse the `catalog:`
 entries in OpenCode's committed `bun.lock`. `build-opencode.sh` now discards the lockfile so
-Bun resolves the rewritten manifests; reproduced and fixed locally with Bun 1.2.13. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
+Bun resolves the rewritten manifests; reproduced and fixed locally with Bun 1.2.13. With that
+in place, run #41319756768 installed 9,025 packages and reached the bundler, which exposed two
+OpenCode 1.19.4 layout changes: the TUI worker moved to `src/cli/tui/worker.ts`, and Bun will
+not unpack `@opentui/core-*` packages for non-host platforms even though the bundler resolves
+their imports. Both are fixed here. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
 diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it
 and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
@@ -2326,6 +2330,21 @@ spec. Deleting the lockfile makes Bun resolve the rewritten manifests (verified 
 packages installed in 5.8 s with a warm install cache), so `build-opencode.sh` now removes
 `bun.lock`/`bun.lockb` before installing.
 
+Run #41319756768 then installed dependencies successfully and failed in the bundler with
+`ModuleNotFound resolving .../packages/opencode/src/cli/cmd/tui/worker.ts`. OpenCode 1.19.4
+moved the TUI worker to `packages/opencode/src/cli/tui/worker.ts`. The same run could not
+resolve `@opentui/core-darwin-x64` and its siblings: `bun add` records platform-specific
+optional packages but does not unpack ones whose `os`/`cpu` do not match the runner, and the
+bundler resolves every literal dynamic import in `@opentui/core`'s platform loader. The build
+script now writes minimal stubs for the seven non-host platform packages; the arm64 stub
+exports `process.env.OPENTUI_LIB_PATH`, which the launcher points at the packaged
+`libopentui.so`.
+
+The JS side pins `@opentui/core` 0.4.5 while this pipeline builds OpenTUI 0.5.10. Comparing
+the prebuilt arm64 libraries, every C symbol exported by 0.4.5 is present in 0.5.10; the 15
+that are missing are C++ runtime internals (`_ZNSt3__1…`, `_ZNSt12…`). The native library is
+kept, but the version skew remains a runtime risk to verify on a device.
+
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
 pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
@@ -2344,6 +2363,8 @@ OpenTUI's `build.zig`.
 | Incomplete vendored manifest | OpenTUI's `ghostty-build.zig.zon` omitted `wuffs`, then `simdutf`/`highway` (run #41281095820 and local evaluation) | copy the `pkg/*` shims and declare them as upstream ghostty does | adding only the first missing dependency |
 | Phantom build option | `-Dstrip=true` on OpenTUI 0.5.10 (run #41281508898) | pass only options the build declares; check `zig build -h` | assuming a standard option set |
 | Relative path reused after `cd` | Bun marker check after `cd "$BUN_SRC"` (run #41281683381) | return to `$REPO_ROOT` first, or absolutize the path | trusting relative paths to survive a `cd` |
+| Stale entrypoint after upstream refactor | `src/cli/cmd/tui/worker.ts` moved to `src/cli/tui/worker.ts` in 1.19.4 (run #41319756768) | resolve entrypoints from the checked-out tree, not from an older release's layout | assuming paths survive a version bump |
+| Optional platform packages not installed | `bun add @opentui/core-linux-arm64` records but does not unpack it on an x64 runner | stub the non-host platform modules; supply the real `.so` through `OPENTUI_LIB_PATH` | adding the package and expecting `node_modules` to contain it |
 | Build-API drift | Zig 0.15 vs 0.16 vs 0.17 `build.zig` | pin Zig, validate generated scripts, consult `lib/std/Build.zig` | changing the Zig version |
 | Hidden patch failure | `git apply … || true` for ghostty | fail on patch mismatch, or assert the expected symbol | continuing with a half-patched tree |
 | Patch applied to the wrong tree | `git apply` inside `build/…/ghostty` skipped everything and exited 0 | `git init` the vendor tree; treat `Skipped patch` as an error | trusting `git apply` exit status alone |
@@ -2384,9 +2405,12 @@ OpenTUI's `build.zig`.
 
 ### 24.8 Open items from the audit
 
-- All native artifacts are green as of run #41282039365. The next step is the OpenCode
-  bundle and transplant (`Build OpenCode standalone binary`), now that the lockfile is
-  discarded. After it passes, confirm packaging and artifact upload.
+- All native artifacts are green as of run #41282039365. The OpenCode install now succeeds;
+  the next gate is the bundle (`Build OpenCode standalone binary`), where the TUI entrypoint
+  and the platform-package stubs were fixed. After it passes, confirm the transplant,
+  packaging and artifact upload.
+- The bundled JS uses `@opentui/core` 0.4.5 while `libopentui.so` is built from 0.5.10. The
+  symbol comparison is clean, but a device smoke test of the TUI is still required.
 - Ghostty patch markers are now asserted in `build-opentui.sh`; re-verify them after any
   OpenTUI or ghostty vendor bump, including the `git init` fix and the regenerated metallib
   patch context.

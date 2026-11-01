@@ -87,6 +87,13 @@ rm -rf "$BUN_BUILD_ABS/cache/zig" "$BUN_SRC_ABS/.zig-cache"
 ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
 ```
 
+### 5. OpenCode bundler cannot resolve the TUI worker or @opentui platform packages
+**Symptom**: `ModuleNotFound resolving .../src/cli/cmd/tui/worker.ts` or `Could not resolve: "@opentui/core-darwin-x64"`
+**Root cause**: OpenCode 1.19.4 moved the worker to `src/cli/tui/worker.ts`; `bun add` will not unpack
+platform packages whose `os`/`cpu` do not match the runner, but the bundler resolves every literal import.
+**Fix**: `build-opencode-android.ts` uses the new worker path; `build-opencode.sh` writes stubs for the
+seven non-host `@opentui/core-*` packages, and the arm64 stub returns `OPENTUI_LIB_PATH` at runtime.
+
 ## Build Order (must be sequential)
 
 1. **ICU** → `scripts/build-icu.sh`

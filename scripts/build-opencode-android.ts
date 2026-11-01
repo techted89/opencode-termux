@@ -119,8 +119,9 @@ try {
 }
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
-const workerPath = "./src/cli/cmd/tui/worker.ts"
-const workerAbsPath = path.resolve(OPENCODE_DIR, "src/cli/cmd/tui/worker.ts")
+// OpenCode 1.19.4 moved the TUI worker from src/cli/cmd/tui to src/cli/tui.
+const workerPath = "./src/cli/tui/worker.ts"
+const workerAbsPath = path.resolve(OPENCODE_DIR, "src/cli/tui/worker.ts")
 
 const bunfsRoot = "/$bunfs/root/"
 const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
@@ -151,7 +152,7 @@ const result = await Bun.build({
     OPENCODE_VERSION: `'${VERSION}'`,
     OPENCODE_MIGRATIONS: JSON.stringify(migrations),
     OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
-    OPENCODE_WORKER_PATH: "./src/cli/cmd/tui/worker.ts",
+    OPENCODE_WORKER_PATH: "./src/cli/tui/worker.ts",
     OPENCODE_CHANNEL: `'${CHANNEL}'`,
     OPENCODE_LIBC: "",
   },
