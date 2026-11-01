@@ -129,7 +129,7 @@ cat > "$UUCOD_GHOSTTY_BUILD" <<'ZIG_EOF'
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{}).target;
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const lib = b.addSharedLibrary(.{
@@ -143,6 +143,9 @@ pub fn build(b: *std.Build) !void {
     // Export tables.zig as a lazy path for ghostty
     const tables_path = b.path("src/tables.zig");
     b.installLazyPath("tables.zig", tables_path);
+
+    // Use the library to avoid unused constant error
+    _ = lib;
 }
 ZIG_EOF
 
