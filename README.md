@@ -39,6 +39,28 @@ the deb and standalone-zip alternatives.
 
 ## Install (Termux)
 
+### Installer script (recommended)
+
+[`scripts/install-termux.sh`](scripts/install-termux.sh) installs any of the three
+release artifacts into `$PREFIX`. It needs no root, verifies `SHA256SUMS` when the
+file sits next to the artifact, checks the aarch64 ELF headers, and keeps the
+previous launcher as `$PREFIX/bin/opencode.pre-install`.
+
+```bash
+# from a checkout of this repo, with the artifact downloaded next to it
+chmod +x scripts/install-termux.sh
+./scripts/install-termux.sh opencode-1.19.4-android-aarch64.zip
+
+# a .deb or .pkg.tar.xz works the same way
+./scripts/install-termux.sh opencode_1.19.4_aarch64.deb
+
+# pass an https URL instead of a path to download and install in one step
+./scripts/install-termux.sh https://github.com/.../opencode-1.19.4-android-aarch64.zip
+```
+
+With no artifact argument it picks a matching package from the current directory.
+The manual package-manager routes are below.
+
 ### Option 1: Standalone binary (easiest)
 
 > **Note:** The zip mirrors the Termux `$PREFIX` layout: `bin/opencode` (launcher),

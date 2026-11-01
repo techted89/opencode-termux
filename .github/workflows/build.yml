@@ -516,6 +516,7 @@ jobs:
             ${{ env.WORK_DIR }}/packages/*.zip
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
+            ${{ env.WORK_DIR }}/packages/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
           compression-level: 6
@@ -544,6 +545,8 @@ jobs:
             ${{ env.WORK_DIR }}/packages/*.zip
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
+            ${{ env.WORK_DIR }}/packages/SHA256SUMS
+            scripts/install-termux.sh
           body: |
             ## OpenCode ${{ env.OPENCODE_VERSION }} for Android/Termux (aarch64)
 
