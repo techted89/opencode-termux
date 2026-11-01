@@ -8,7 +8,20 @@ mkdir -p "$WORK_DIR"
 if [ ! -d "$src/.git" ]; then
   git clone --depth 1 --branch "v${OPENTUI_VERSION}" https://github.com/anomalyco/opentui.git "$src"
 fi
-git -C "$src" apply "$REPO_ROOT/patches/opentui/v2-0.5.10-android.patch" 2>/dev/null || true
+OPENTUI_PATCH="$REPO_ROOT/patches/opentui/v2-0.5.10-android.patch"
+if git -C "$src" apply --check "$OPENTUI_PATCH" 2>/dev/null; then
+    git -C "$src" apply "$OPENTUI_PATCH"
+    echo "    opentui android patch: applied"
+elif git -C "$src" apply -R --check "$OPENTUI_PATCH" 2>/dev/null; then
+    echo "    opentui android patch: already applied"
+else
+    echo "ERROR: opentui android patch does not apply to $src" >&2
+    exit 1
+fi
+grep -qF "fn bionicSysrootInclude" "$src/packages/native/build.zig" || {
+    echo "ERROR: opentui android patch did not take effect in packages/native/build.zig" >&2
+    exit 1
+}
 
 rm -rf "$BIONIC_SYSROOT_INC"
 mkdir -p "$BIONIC_SYSROOT_INC"

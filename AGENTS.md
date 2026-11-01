@@ -94,7 +94,7 @@ ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"
 3. **TinyCC** → `scripts/build-tinycc.sh`
 4. **Bun** → `scripts/build-bun.sh` (needs WebKit, TinyCC)
 5. **libopentui.so** → `scripts/build-opentui.sh` (needs Zig, NDK)
-6. **OpenCode binary** → `scripts/build-opencode.sh` (needs Bun, libopentui.so)
+6. **OpenCode binary** → `scripts/build-opencode.sh` (needs Bun, libopentui.so; emits `dist/{bin,libexec,lib}`)
 7. **Packages** → `scripts/make-packages.sh`
 
 ## Environment Setup
@@ -130,9 +130,11 @@ file build/bun-build/bun | grep aarch64
 file build/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so
 readelf -d build/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so | grep NEEDED
 
-# Verify final OpenCode binary
-file build/dist/opencode
-readelf -h build/dist/opencode | grep -E "Machine|Class"
+# Verify final OpenCode binary and its embedded module graph
+file build/dist/libexec/opencode/opencode.bin
+readelf -h build/dist/libexec/opencode/opencode.bin | grep -E "Machine|Class"
+python3 scripts/lint-patch-application.py
+python3 scripts/transplant-bun-graph.py verify build/dist/libexec/opencode/opencode.bin --expect-stride 36
 ```
 
 ## Patches Applied
@@ -141,4 +143,3 @@ readelf -h build/dist/opencode | grep -E "Machine|Class"
 - `patches/webkit/android-support.patch` — JSCOnly Android build fixes
 - `patches/zig/posix-android-sigaction.patch` — Bionic sigaction/sigprocmask bypass
 - `patches/opentui/v2-0.5.10-android.patch` — aarch64-linux-android target, bionic sysroot, u32 bounds checks
-- `patches/opentui/android-libc-link.patch` — Links NDK libc.so stub for `NEEDED libc.so`

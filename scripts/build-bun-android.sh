@@ -30,6 +30,10 @@ git -C "$BUN_SRC" checkout -f "$BUN_TAG"
 git -C "$BUN_SRC" clean -fdq src
 git -C "$BUN_SRC" apply "$PATCH"
 echo ">>> applied $PATCH"
+grep -qF "static void onSIGSYS" "$BUN_SRC/src/jsc/bindings/c-bindings.cpp" || {
+    echo "ERROR: seccomp patch marker missing in c-bindings.cpp" >&2
+    exit 1
+}
 
 # Host LLVM 21 toolchain.
 # - $BUN_TOOLCHAIN_LLVM, if set, is used verbatim (dir with bin/clang, bin/ld.lld).

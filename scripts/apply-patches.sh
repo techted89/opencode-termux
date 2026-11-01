@@ -32,6 +32,10 @@ git checkout -- . 2>/dev/null || true  # Reset any previous patches
 git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
 git apply "$REPO_ROOT/patches/bun/android-support.patch"
 echo "    Bun patches applied successfully"
+grep -qF "pub const isAndroid" "$BUN_SRC/src/env.zig" || {
+    echo "ERROR: Bun patch marker missing in src/env.zig" >&2
+    exit 1
+}
 cd "$REPO_ROOT"
 
 # --- Clone WebKit ---
@@ -55,6 +59,10 @@ echo ">>> Applying WebKit Android patches..."
     git apply --stat "$REPO_ROOT/patches/webkit/android-support.patch" && \
     git apply "$REPO_ROOT/patches/webkit/android-support.patch")
 echo "    WebKit patches applied successfully"
+grep -qF "usePollingTraps() = true" "$WEBKIT_SRC/Source/JavaScriptCore/runtime/InitializeThreading.cpp" || {
+    echo "ERROR: WebKit patch marker missing in InitializeThreading.cpp" >&2
+    exit 1
+}
 
 echo ""
 echo "=== Patches Applied ==="

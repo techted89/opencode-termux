@@ -36,7 +36,7 @@ else
 fi
 
 # Android bionic sysroot + zig libc config (required by v2-0.5.10-android.patch
-# bionicSysrootInclude()/bionicSysrootLib() and android-libc-link.patch)
+# bionicSysrootInclude()/bionicSysrootLib())
 export BIONIC_SYSROOT_INC="${WORK_DIR_ABS}/bionic-include"
 export ZIG_LIBC="${WORK_DIR_ABS}/bionic-libc.txt"
 export ANDROID_NDK_LIB_DIR="${NDK_SYSROOT}/usr/lib/${ANDROID_TRIPLE}/${ANDROID_API}"
@@ -58,30 +58,45 @@ fi
 
 # Apply the opentui Android patch (adds aarch64-linux-android library target,
 # bionic sysroot handling, pthread/m guards for android)
-OPENTUI_PATCH="$REPO_ROOT/patches/opentui/v2-0.5.10-android.patch"
-if [ -f "$OPENTUI_PATCH" ]; then
-    echo ">>> Applying opentui Android patch..."
-    cd "$OPENTUI_SRC_ABS"
-    if ! git apply --check "$OPENTUI_PATCH" 2>/dev/null; then
-        echo "    Patch already applied or does not apply cleanly, skipping"
-    else
-        git apply "$OPENTUI_PATCH"
-        echo "    Patch applied successfully"
-    fi
-fi
+# Apply a git-format patch and prove it took effect. Upstream context moves, and a
+# patch that silently fails leaves an unpatched vendor tree that only breaks much
+# later in the build (docs section 24).
+apply_verified_patch() {
+    local dir="$1" patch_file="$2" target_rel="$3" marker="$4" label="$5"
 
-# Apply android-libc-link.patch (links NDK libc.so stub so .so has NEEDED libc.so)
-ANDROID_LIBC_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
-if [ -f "$ANDROID_LIBC_PATCH" ]; then
-    echo ">>> Applying android-libc-link.patch..."
-    cd "$OPENTUI_SRC_ABS"
-    if ! git apply --check "$ANDROID_LIBC_PATCH" 2>/dev/null; then
-        echo "    Patch already applied or does not apply cleanly, skipping"
-    else
-        git apply "$ANDROID_LIBC_PATCH"
-        echo "    Patch applied successfully"
+    if [ ! -f "$patch_file" ]; then
+        echo "ERROR: $label patch not found: $patch_file" >&2
+        exit 1
     fi
-fi
+
+    if (cd "$dir" && git apply --check "$patch_file" 2>/dev/null); then
+        (cd "$dir" && git apply "$patch_file")
+        echo "    $label: applied"
+    elif (cd "$dir" && git apply -R --check "$patch_file" 2>/dev/null); then
+        echo "    $label: already applied"
+    else
+        echo "ERROR: $label patch does not apply to $dir" >&2
+        (cd "$dir" && git apply --stat "$patch_file") >&2 || true
+        exit 1
+    fi
+
+    if ! grep -qF -- "$marker" "$dir/$target_rel"; then
+        echo "ERROR: $label patch did not take effect in $target_rel" >&2
+        echo "       expected marker: $marker" >&2
+        exit 1
+    fi
+}
+
+OPENTUI_PATCH="$REPO_ROOT/patches/opentui/v2-0.5.10-android.patch"
+echo ">>> Applying opentui Android patch..."
+apply_verified_patch "$OPENTUI_SRC_ABS" "$OPENTUI_PATCH" \
+    "packages/native/build.zig" "fn bionicSysrootInclude" "opentui android"
+
+# The old android-libc-link.patch is retired: its target
+# packages/core/src/zig/build.zig does not exist in OpenTUI 0.5.10, and the native
+# build already sets module.link_libc = true. The NEEDED libc.so postcondition is
+# enforced by the readelf check after the build.
+
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC_ABS/packages/native"
 OPENTUI_ZIG_DEPS="$OPENTUI_ZIG_DIR/zig-deps"
@@ -132,23 +147,38 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addLibrary(.{
-        .name = "uucode",
-        .version = "0.1.0",
-        .root_module = b.path("src/root.zig"),
+    // Zig 0.16: addLibrary takes a *Module, not a path, and LibraryOptions has no
+    // .target/.optimize fields. Those belong on the module created here.
+    const module = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .linkage = .dynamic,
     });
 
-    // Export tables.zig as a lazy path for ghostty
-    const tables_path = b.path("src/tables.zig");
-    b.installLazyPath("tables.zig", tables_path);
+    const lib = b.addLibrary(.{
+        .name = "uucode",
+        .root_module = module,
+        .linkage = .dynamic,
+        .version = .{ .major = 0, .minor = 1, .patch = 0 },
+    });
+    b.installArtifact(lib);
 
-    // Use the library to avoid unused constant error
-    _ = lib;
+    // Export tables.zig for ghostty's dependency path lookup. (The old
+    // b.installLazyPath call does not exist in Zig 0.16.)
+    b.installFile("src/tables.zig", "tables.zig");
 }
 ZIG_EOF
+
+# Validate the generated build script before spending time on the real build.
+# A Zig API mismatch fails here in about a second instead of as an opaque
+# "Build libopentui.so" failure (see docs section 24).
+echo ">>> Validating generated uucode-ghostty/build.zig..."
+if ! (cd "$OPENTUI_ZIG_DEPS/uucode-ghostty" && "$ZIG_BIN_ABS" build --help >/dev/null 2>&1); then
+    echo "ERROR: generated build.zig does not evaluate with $( "$ZIG_BIN_ABS" version )."
+    echo "       This is a Zig build API change, not a network or NDK problem."
+    (cd "$OPENTUI_ZIG_DEPS/uucode-ghostty" && "$ZIG_BIN_ABS" build --help) 2>&1 | head -20 || true
+    exit 1
+fi
 
 # Create build.zig.zon for uucode-ghostty (always recreate to ensure correct content)
 UUCOD_GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig.zon"
@@ -178,14 +208,17 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     # Custom ghostty build files from opentui vendor
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig"
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig.zon" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
-    curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-shared-deps.patch" -o "$WORK_DIR_ABS/ghostty-shared-deps.patch"
-    (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$WORK_DIR_ABS/ghostty-shared-deps.patch") || true
-    # Apply additional patch to skip metallib for non-Apple targets (Android)
+    GHOSTTY_SHARED_DEPS_PATCH="$WORK_DIR_ABS/ghostty-shared-deps.patch"
+    curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-shared-deps.patch" -o "$GHOSTTY_SHARED_DEPS_PATCH"
+    apply_verified_patch "$OPENTUI_ZIG_DEPS/ghostty" "$GHOSTTY_SHARED_DEPS_PATCH" \
+        "src/build/SharedDeps.zig" ".framedata = undefined," "ghostty shared-deps"
+
+    # Skip the Metal shader library on Android. This patch carries only the guard
+    # hunk; the framedata change above comes from the shared-deps patch.
     GHOSTTY_METALLIB_PATCH="$REPO_ROOT/patches/opentui/ghostty-android-metallib.patch"
-    if [ -f "$GHOSTTY_METALLIB_PATCH" ]; then
-        echo ">>> Applying ghostty Android metallib patch..."
-        (cd "$OPENTUI_ZIG_DEPS/ghostty" && git apply "$GHOSTTY_METALLIB_PATCH") || true
-    fi
+    echo ">>> Applying ghostty Android metallib patch..."
+    apply_verified_patch "$OPENTUI_ZIG_DEPS/ghostty" "$GHOSTTY_METALLIB_PATCH" \
+        "src/build/SharedDeps.zig" "Only create metallib for Apple targets" "ghostty metallib"
     rm -rf "$WORK_DIR_ABS/ghostty-staging" "$WORK_DIR_ABS/ghostty.tar.gz" "$WORK_DIR_ABS/ghostty-shared-deps.patch"
 fi
 

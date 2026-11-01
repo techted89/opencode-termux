@@ -103,6 +103,10 @@ if [ -f "$ZIG_POSIX" ]; then
     if patch --dry-run -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" >/dev/null 2>&1; then
         patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch"
         echo "    Zig patch applied successfully."
+        grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" || {
+            echo "ERROR: Zig patch applied but marker missing" >&2
+            exit 1
+        }
     else
         # Check if already applied by looking for the Android bypass code
         if grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" 2>/dev/null; then
@@ -111,6 +115,10 @@ if [ -f "$ZIG_POSIX" ]; then
             echo "WARNING: Zig patch doesn't match cleanly. Trying with --fuzz..."
             patch -p1 --fuzz=3 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" || {
                 echo "ERROR: Could not apply Zig patch. Manual intervention required."
+                exit 1
+            }
+            grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" || {
+                echo "ERROR: Zig patch applied with fuzz but marker missing" >&2
                 exit 1
             }
         fi
@@ -133,11 +141,15 @@ ninja -j"$JOBS" 2>&1 || {
     if [ -f "$ZIG_POSIX" ] && ! grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" 2>/dev/null; then
         echo ">>> Zig downloaded during build but patch not applied. Applying now..."
         cd "$BUN_SRC_ABS"
-        patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" || {
+        patch -p1 < "$REPO_ROOT/patches/zig/posix-android-sigaction.patch" || {  # lint:allow-repeat-application
             echo "ERROR: Zig patch failed to apply"
             exit 1
         }
         echo "    Zig patch applied. Clearing Zig cache and rebuilding..."
+        grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" || {
+            echo "ERROR: Zig patch applied but marker missing" >&2
+            exit 1
+        }
         rm -rf "$BUN_BUILD_ABS/cache/zig" "$BUN_SRC_ABS/.zig-cache"
         mkdir -p "$BUN_BUILD_ABS/cache/zig/local" "$BUN_BUILD_ABS/cache/zig/global"
         ln -sfn "$BUN_BUILD_ABS/cache/zig/local" "$BUN_SRC_ABS/.zig-cache"

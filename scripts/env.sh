@@ -10,6 +10,12 @@ export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Versions
 export BUN_VERSION="${BUN_VERSION:-1.2.13}"
 export BUN_TAG="bun-v${BUN_VERSION}"
+# CompiledModuleGraphFile stride inside the standalone module graph:
+#   Bun <= 1.3.2  -> 36 bytes (4 StringPointers + 3 flags + 1 padding), Offsets 24 bytes
+#   Bun >= 1.3.11 -> 52 bytes (6 StringPointers + 4 flags), Offsets 32 bytes, trailing data
+# Host and target Bun must agree; scripts/transplant-bun-graph.py enforces this.
+# Change to 52 only together with BUN_VERSION (see README "Upgrade status: Bun 1.3.14").
+export MODULE_GRAPH_STRIDE="${MODULE_GRAPH_STRIDE:-36}"
 export WEBKIT_COMMIT="${WEBKIT_COMMIT:-017930ebf915121f8f593bef61cbbca82d78132d}"
 export ICU_VERSION="${ICU_VERSION:-75.1}"
 export ZIG_VERSION="${ZIG_VERSION:-0.16.0}"
@@ -57,7 +63,7 @@ echo "Work dir:      ${WORK_DIR}"
 echo "NDK:           ${ANDROID_NDK_HOME}"
 echo "API Level:     ${ANDROID_API}"
 echo "Target:        ${ANDROID_TRIPLE}"
-echo "Bun version:   ${BUN_VERSION}"
+echo "Bun version:   ${BUN_VERSION} (module stride ${MODULE_GRAPH_STRIDE})"
 echo "WebKit commit: ${WEBKIT_COMMIT}"
 echo "OpenCode ver:  ${OPENCODE_VERSION}"
 echo "Jobs:          ${JOBS}"

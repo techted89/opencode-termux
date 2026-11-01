@@ -4,6 +4,8 @@ Build system for cross-compiling [OpenCode](https://github.com/anomalyco/opencod
 
 OpenCode is an AI-powered coding assistant for the terminal. It uses [Bun](https://bun.sh/) as its JavaScript runtime and compiles to a standalone binary via `bun build --compile`. Since Bun has no official Android support ([marked "not planned"](https://github.com/oven-sh/bun/issues/9)), this project cross-compiles Bun itself from source for Android/aarch64, including the full WebKit/JavaScriptCore engine.
 
+> **Full build specification:** [docs/BUILD-OPENCODE-1.19.4-ANDROID.md](docs/BUILD-OPENCODE-1.19.4-ANDROID.md) — dependency topology, every patch with diffs and reasoning, the standalone binary format, packaging, CI, and verification, plus implementation strategy, an expanded stage-by-stage runbook, and an agent operating manual.
+
 
 ## Versions
 
@@ -12,7 +14,7 @@ separate packages and commands, and v2 never overwrites v1 files.
 
 | | Command | Status | Runtime |
 |---|---|---|---|
-| OpenCode 1.x | `opencode` | stable | patched Bun 1.3.14 + WebKit/JSC, built from source |
+| OpenCode 1.x | `opencode` | stable | patched Bun 1.2.13 + WebKit/JSC, built from source |
 | OpenCode 2.x | `opencode2` | pre-release | official Bun 1.4.2 android target + OpenTUI 0.5.10 |
 
 Install the v2 pre-release alongside v1:
@@ -39,22 +41,17 @@ the deb and standalone-zip alternatives.
 
 ### Option 1: Standalone binary (easiest)
 
-> **Note:** The zip now contains a wrapper script (`opencode`), the main binary
-> (`opencode.bin`), and native libraries (`.so` files). All files must be
-> installed to their proper locations.
+> **Note:** The zip mirrors the Termux `$PREFIX` layout: `bin/opencode` (launcher),
+> `libexec/opencode/opencode.bin` (the ELF), and `lib/*.so` (native libraries).
+> Unpack it over `$PREFIX` so the launcher can find the binary and the libraries.
 
 ```bash
 # Download the latest "opencode-*-android-aarch64.zip" from
 #   https://github.com/guysoft/opencode-termux/releases/latest
 # Then install:
 
-mkdir -p $PREFIX/libexec/opencode $PREFIX/lib
-unzip opencode-*-android-aarch64.zip
-mv opencode $PREFIX/bin/opencode
-chmod +x $PREFIX/bin/opencode
-mv opencode.bin $PREFIX/libexec/opencode/opencode.bin
-chmod +x $PREFIX/libexec/opencode/opencode.bin
-mv libtagfix.so libc++_shared.so libopentui.so $PREFIX/lib/
+unzip -o opencode-*-android-aarch64.zip -d "$PREFIX"
+chmod +x "$PREFIX/bin/opencode" "$PREFIX/libexec/opencode/opencode.bin"
 
 # Install required dependency
 pkg install ripgrep
@@ -108,7 +105,6 @@ opencode-termux/
     bun/android-support.patch      # 33 files, Bun Android/aarch64 support
     webkit/android-support.patch   # 5 files, WebKit/JSC Android fixes
     zig/posix-android-sigaction.patch  # Zig stdlib sigaction/sigprocmask fix
-    opentui/android-libc-link.patch  # Link NDK libc.so for Android dlopen
     opentui/v2-0.5.10-android.patch  # (v2) OpenTUI android/bionic build fixes
     bun/android-seccomp-sigsys.patch # (v2) Bun: turn seccomp SIGSYS into ENOSYS (upstream #39775)
   scripts/
@@ -118,9 +114,11 @@ opencode-termux/
     build-tinycc.sh                # Cross-compile TinyCC (libtcc.a) for Android
     build-bun.sh                   # Cross-compile Bun for Android
     build-opentui.sh               # Build libopentui.so for Android
-    build-opencode.sh              # Build OpenCode standalone binary
+    build-opencode.sh              # Build OpenCode and stage the $PREFIX layout
+    transplant-bun-graph.py        # Inspect/transplant/verify the Bun module graph
     make-packages.sh               # Create zip, pacman, and deb packages
-    build-opencode-android.ts      # TypeScript helper (module graph extraction)
+    build-opencode-android.ts      # TypeScript helper (host bundle + standalone compile)
+    lint-patch-application.py      # Reject silent failures; verify patch coverage and markers
     env-v2.sh                      # (v2) Environment for the v2 pipeline
     build-opentui-v2.sh            # (v2) Build libopentui.so for Android/bionic
     build-bun-android.sh           # (v2) Build patched Bun for Android (seccomp fix)
@@ -247,7 +245,7 @@ Bun has zero Android support. Every patch falls into one of these categories:
 
 Since `bun build --compile` has no Android cross-compilation target, we use a manual approach:
 
-1. Use **host Bun (v1.3.14)** to `bun build --compile` OpenCode for the host platform
+1. Use **host Bun (v1.2.13)** to `bun build --compile` OpenCode for the host platform
 2. Extract the serialized **module graph** from the host standalone binary by locating the `\n---- Bun! ----\n` trailer and reading the `Offsets` struct
 3. Patch the module graph in-place (fix `undici` global reference)
 4. Before bundling, swap x86_64 `libopentui.so` with the ARM64 Android-built version, so it gets embedded in the module graph
@@ -261,15 +259,48 @@ The standalone binary format:
 [total_byte_count as u64 LE (8 bytes)]
 ```
 
-### Why host Bun must be pinned to v1.3.14
+### Why the host Bun must match the target Bun
 
-The `CompiledModuleGraphFile` struct layout changed between Bun versions:
-- **Bun <= 1.3.2**: 36-byte stride (4 StringPointers + 3 u8 + 1 padding)
-- **Bun >= 1.3.11**: 52-byte stride (6 StringPointers + 4 u8)
+The serialized module graph is not self-describing: both the `Offsets` struct and the
+`CompiledModuleGraphFile` stride are positional, so the host bundler and the Android
+runtime must come from compatible Bun releases.
 
-The target Android Bun is v1.3.14, which expects 52-byte stride. The host Bun must match the target version to ensure the module graph is compatible.
+| Bun | `Offsets` | Module stride | Layout |
+|---|---|---|---|
+| <= 1.3.2 | 24 bytes | 36 bytes (4 StringPointers + 3 u8 + 1 padding) | graph ends at `EOF-8`, `total_byte_count == file size` |
+| >= 1.3.11 | 32 bytes | 52 bytes (6 StringPointers + 4 u8) | trailing data after the trailer, no size footer at EOF |
 
-We can't use Bun 1.2.13 as host either, because OpenCode's monorepo uses `catalog:` workspace protocol (added in Bun 1.3.x) -- `bun install` fails. **Bun 1.3.14 is the sweet spot**: supports `catalog:` AND produces compatible 52-byte modules.
+This pipeline pins **Bun 1.2.13** for host and target (36-byte stride, layout v1).
+`scripts/transplant-bun-graph.py` locates the trailer from the end of the file,
+auto-detects the `Offsets` size and the module stride, validates every StringPointer
+against the string-data region, and refuses to graft a graph whose stride does not
+match the target. CI runs its `verify` subcommand on the finished binary, so a
+host/target mismatch fails the build instead of shipping a binary that dies at startup.
+
+The previous helper hardcoded a 32-byte `Offsets` struct (the 1.3.x layout). Against a
+1.2.13 host binary that read past the struct and derived a negative runtime size, so the
+transplant step could not succeed.
+
+OpenCode's monorepo uses the `catalog:` workspace protocol, which Bun 1.2.13 cannot
+resolve. `build-opencode.sh` rewrites those references from the root catalog before
+`bun install`, so the host bundler stays on the pinned release.
+
+### Upgrade status: Bun 1.3.14
+
+Moving the runtime to Bun 1.3.14 is **not** a patch rebase, so the pipeline stays on
+1.2.13 until that work is done:
+
+- Bun v1.3.14 no longer ships a `cmake/` tree at all (`git ls-tree -r --name-only bun-v1.3.14 | grep '^cmake/'` is empty); the build moved to `build.zig`. `scripts/build-bun.sh` drives CMake plus `cmake/toolchains/android-aarch64.cmake`, so it needs a full port to the new build system.
+- About half of the 33 files in `patches/bun/android-support.patch` moved: `src/standalone/` -> `src/standalone_graph/`, `src/bun.js/*` -> `src/jsc/*`, `src/deps/*` -> `src/cares_sys|tcc_sys/*`, `src/Global.zig` -> `src/bun_core/Global.zig`, `src/env.zig` -> `src/bun_core/env.zig`.
+- That release also uses graph layout v2 (32-byte `Offsets`, 52-byte stride, trailing data after the trailer), which a 1.2.13 runtime cannot read.
+
+`scripts/transplant-bun-graph.py inspect` reports the layout of any standalone binary,
+so the format half of a version bump can be checked before starting the build-system
+port:
+
+```bash
+python3 scripts/transplant-bun-graph.py inspect path/to/standalone-binary
+```
 
 ---
 
@@ -294,7 +325,7 @@ We can't use Bun 1.2.13 as host either, because OpenCode's monorepo uses `catalo
 
 | Workaround | Why |
 |-----------|-----|
-| Host Bun pinned to 1.3.14 | Module graph struct compatibility between host and target Bun versions (see above) |
+| Host Bun pinned to 1.2.13 | Module graph struct compatibility between host and target Bun (see above) |
 | `close_range()` replaced with `/proc/self/fd` iteration | Android seccomp blocks the `close_range` syscall in app processes |
 | `preadv2`/`pwritev2`/`epoll_pwait2` return ENOSYS | Seccomp may block these; callers fall back gracefully |
 | `setenv("JSC_*")` before `JSC::initialize()` | Options API is reset during initialization; env vars survive the reset |
@@ -370,15 +401,15 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 
 | Component | Version/Commit | Why pinned |
 |-----------|---------------|------------|
-| Bun (target) | v1.3.14 (tag `bun-v1.3.14`) | Matches OpenCode 1.18.0+ runtime |
-| Bun (host) | v1.3.14 | Module graph compat (52-byte stride) + catalog: support |
-| WebKit/JSC | `017930eb` (oven-sh/WebKit) | Matches Bun v1.3.14's expected WebKit |
-| ICU | 75.1 | Matches Bun v1.3.14's expected ICU |
+| Bun (target) | v1.2.13 (tag `bun-v1.2.13`) | Verified Android build; see upgrade status |
+| Bun (host) | v1.2.13 | Module graph compat (36-byte stride, layout v1) |
+| WebKit/JSC | `017930eb` (oven-sh/WebKit) | Matches Bun v1.2.13's expected WebKit |
+| ICU | 75.1 | Matches Bun v1.2.13's expected ICU |
 | Android NDK | r28b (28.1.13356709) | Clang 19, stable |
 | Android API level | 24 (Android 7.0+) | Minimum for 64-bit Termux |
-| Zig (for opentui) | 0.15.2 | Latest stable, Android target support |
-| OpenCode | 1.18.0+ | Current release |
-| TinyCC | `b91835d8` (oven-sh/tinycc) | Matches Bun v1.3.14's expected TinyCC |
+| Zig (for opentui) | 0.16.0 | `build.zig` uses the 0.16 API (`addLibrary`, `root_module`) |
+| OpenCode | 1.19.4 | Target release |
+| TinyCC | `b91835d8` (oven-sh/tinycc) | Matches Bun v1.2.13's expected TinyCC |
 
 ---
 
@@ -398,8 +429,8 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 | Ninja | 1.10+ | Build tool |
 | Rust | stable | lol-html crate (with `aarch64-linux-android` target) |
 | Go | 1.20+ | BoringSSL |
-| Zig | 0.15.2 | libopentui.so build |
-| Bun | 1.3.14 (host, pinned) | OpenCode bundling |
+| Zig | 0.16.0 | libopentui.so build |
+| Bun | 1.2.13 (host, pinned) | OpenCode bundling |
 | Python3 | 3.8+ | WebKit code generation |
 | Ruby | 2.7+ | WebKit code generation |
 | Perl | 5.20+ | WebKit code generation |
