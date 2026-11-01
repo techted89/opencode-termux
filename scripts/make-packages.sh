@@ -136,12 +136,15 @@ rm -rf "$ZIP_ROOT" "$PACMAN_ROOT" "$DEB_ROOT"
 # ==========================================
 # Summary
 # ==========================================
-(cd "$PKG_DIR_ABS" && sha256sum "$ZIP_NAME" "$PACMAN_NAME" "$DEB_NAME" > SHA256SUMS)
+# Ship the root-free installer next to the packages and checksum it too, so
+# users can verify every release asset with one `sha256sum -c SHA256SUMS`.
+install -m 755 "$REPO_ROOT_ABS/scripts/install-termux.sh" "$PKG_DIR_ABS/install-termux.sh"
+(cd "$PKG_DIR_ABS" && sha256sum "$ZIP_NAME" "$PACMAN_NAME" "$DEB_NAME" install-termux.sh > SHA256SUMS)
 
 echo ""
 echo "=== Packages created ==="
 echo ""
-ls -lh "$PKG_DIR_ABS/$ZIP_NAME" "$PKG_DIR_ABS/$PACMAN_NAME" "$PKG_DIR_ABS/$DEB_NAME" "$PKG_DIR_ABS/SHA256SUMS"
+ls -lh "$PKG_DIR_ABS/$ZIP_NAME" "$PKG_DIR_ABS/$PACMAN_NAME" "$PKG_DIR_ABS/$DEB_NAME" "$PKG_DIR_ABS/SHA256SUMS" "$PKG_DIR_ABS/install-termux.sh"
 echo ""
 echo "Install on Termux:"
 echo "  pacman -U $PACMAN_NAME"

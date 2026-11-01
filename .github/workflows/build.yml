@@ -522,7 +522,7 @@ jobs:
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
             ${{ env.WORK_DIR }}/packages/SHA256SUMS
-            scripts/install-termux.sh
+            ${{ env.WORK_DIR }}/packages/install-termux.sh
           if-no-files-found: error
           retention-days: 30
           compression-level: 6
@@ -552,7 +552,7 @@ jobs:
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
             ${{ env.WORK_DIR }}/packages/SHA256SUMS
-            scripts/install-termux.sh
+            ${{ env.WORK_DIR }}/packages/install-termux.sh
           body: |
             ## OpenCode ${{ env.OPENCODE_VERSION }} for Android/Termux (aarch64)
 
@@ -647,6 +647,25 @@ jobs:
           else
             echo "WARNING: No DEB package found"
           fi
+
+          # SHA256SUMS and the root-free installer must be part of the artifact
+          if [ -f artifacts/SHA256SUMS ]; then
+            echo "✓ SHA256SUMS found"
+            cat artifacts/SHA256SUMS
+          else
+            echo "ERROR: SHA256SUMS missing"
+            exit 1
+          fi
+
+          if [ -f artifacts/install-termux.sh ]; then
+            echo "✓ install-termux.sh found"
+            head -1 artifacts/install-termux.sh
+          else
+            echo "ERROR: install-termux.sh missing"
+            exit 1
+          fi
+
+          (cd artifacts && sha256sum -c SHA256SUMS)
 
       - name: Verify binary architecture
         run: |
