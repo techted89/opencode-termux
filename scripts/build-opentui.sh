@@ -176,6 +176,7 @@ if [ ! -f "$UUCOD_GHOSTTY_ZON" ]; then
 .{
     .name = .uucode,
     .version = "0.1.0",
+    .fingerprint = 0x8d4ebdea5541ef31,
     .paths = .{"src"},
     .dependencies = .{},
 }
