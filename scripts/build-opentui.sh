@@ -122,11 +122,10 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-ghostty" ]; then
     rm -f "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
 fi
 
-# Create build.zig for uucode-ghostty if it doesn't exist
+# Create build.zig for uucode-ghostty (always recreate to ensure correct content)
 UUCOD_GHOSTTY_BUILD="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig"
-if [ ! -f "$UUCOD_GHOSTTY_BUILD" ]; then
-    echo ">>> Creating build.zig for uucode-ghostty..."
-    cat > "$UUCOD_GHOSTTY_BUILD" <<'ZIG_EOF'
+echo ">>> Creating build.zig for uucode-ghostty..."
+cat > "$UUCOD_GHOSTTY_BUILD" <<'ZIG_EOF'
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
@@ -146,7 +145,6 @@ pub fn build(b: *std.Build) !void {
     b.installLazyPath("tables.zig", tables_path);
 }
 ZIG_EOF
-fi
 
 # Create build.zig.zon for uucode-ghostty if it doesn't exist
     .paths = .{"src"},
