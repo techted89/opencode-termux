@@ -39,6 +39,7 @@ env:
   WORK_DIR: "./build"
   # Cache configuration
   CACHE_ENABLE_CROSS_OS: "true"
+  CACHE_VERSION: "v2"
 
 jobs:
   # -----------------------------------------------------------------------
@@ -166,10 +167,10 @@ jobs:
       - name: Pre-install @types/bun and native packages to avoid git clone in CI
         run: |
           bun add -g @types/bun@1.2.13
-          bun add -g @opentui/core-linux-arm64@0.5.10 --no-cache 2>/dev/null || true
-          bun add -g @opentui/core-linux-x64@0.5.10 --no-cache 2>/dev/null || true
-          bun add -g @opentui/core-linux-arm64-musl@0.5.10 --no-cache 2>/dev/null || true
-          bun add -g @opentui/core-linux-x64-musl@0.5.10 --no-cache 2>/dev/null || true
+          bun add -g @opentui/core-linux-arm64@0.5.10 2>/dev/null || true
+          bun add -g @opentui/core-linux-x64@0.5.10 2>/dev/null || true
+          bun add -g @opentui/core-linux-arm64-musl@0.5.10 2>/dev/null || true
+          bun add -g @opentui/core-linux-x64-musl@0.5.10 2>/dev/null || true
 
       - name: Verify Bun, @types/bun and native packages
         run: |
@@ -196,55 +197,40 @@ jobs:
           echo "zig_patch_hash=$ZIG_PATCH_HASH" >> $GITHUB_OUTPUT
           echo "opentui_patch_hash=$OPENTUI_PATCH_HASH" >> $GITHUB_OUTPUT
 
-      - name: Cache ICU build
+      - name: Restore ICU cache
         id: cache-icu
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/deps-android/prefix
-          key: ${{ runner.os }}-icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
-          restore-keys: |
-            ${{ runner.os }}-icu-android-${{ env.ICU_VERSION }}-
-            ${{ runner.os }}-icu-android-
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-icu-${{ env.ICU_VERSION }}-api${{ env.ANDROID_API }}-ndk${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('scripts/build-icu.sh', 'scripts/env.sh') }}
 
-      - name: Cache WebKit build
+      - name: Restore WebKit cache
         id: cache-webkit
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/webkit-android
-          key: ${{ runner.os }}-webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
-          restore-keys: |
-            ${{ runner.os }}-webkit-android-${{ env.WEBKIT_COMMIT }}-
-            ${{ runner.os }}-webkit-android-
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-icu${{ env.ICU_VERSION }}-api${{ env.ANDROID_API }}-ndk${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('scripts/build-webkit.sh', 'scripts/build-icu.sh', 'scripts/env.sh', 'cmake/webkit-android-toolchain.cmake') }}
 
-      - name: Cache Bun binary
+      - name: Restore Bun binary cache
         id: cache-bun
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: ${{ runner.os }}-bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
-          restore-keys: |
-            ${{ runner.os }}-bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-
-            ${{ runner.os }}-bun-android-${{ env.BUN_VERSION }}-
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-bun-${{ env.BUN_VERSION }}-zig${{ env.ZIG_VERSION }}-icu${{ env.ICU_VERSION }}-api${{ env.ANDROID_API }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-webkit${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('scripts/build-bun.sh', 'scripts/build-webkit.sh', 'scripts/build-icu.sh', 'scripts/env.sh') }}
 
-      - name: Cache libopentui.so
+      - name: Restore Zig build cache
+        id: cache-zig
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WORK_DIR }}/bun-build/cache/zig
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-bun-zig-${{ env.BUN_VERSION }}-${{ env.ZIG_VERSION }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('scripts/build-bun.sh', 'scripts/env.sh') }}
+
+      - name: Restore libopentui cache
         id: cache-opentui
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so
-          key: ${{ runner.os }}-opentui-android-${{ env.OPENTUI_VERSION }}-${{ steps.hashes.outputs.opentui_patch_hash }}-${{ env.ZIG_VERSION }}
-          restore-keys: |
-            ${{ runner.os }}-opentui-android-${{ env.OPENTUI_VERSION }}-${{ steps.hashes.outputs.opentui_patch_hash }}-
-            ${{ runner.os }}-opentui-android-${{ env.OPENTUI_VERSION }}-
-
-      - name: Cache OpenCode node_modules
-        id: cache-opencode-deps
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.WORK_DIR }}/opencode-src/node_modules
-          key: ${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-${{ hashFiles('${{ env.WORK_DIR }}/opencode-src/package.json') }}-${{ env.BUN_VERSION }}
-          restore-keys: |
-            ${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-
-            ${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-opentui-${{ env.OPENTUI_VERSION }}-${{ hashFiles('patches/opentui/*.patch') }}-zig${{ env.ZIG_VERSION }}-api${{ env.ANDROID_API }}-ndk${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('scripts/build-opentui.sh', 'scripts/env.sh') }}
 
       # ======================================================================
       # Active Runner Log Surveillance: Dynamic patch verification
@@ -265,72 +251,9 @@ jobs:
           mkdir -p "${OPENTUI_SRC}/packages/native/zig-deps/uucode-ghostty"
 
       # ======================================================================
-      # Clone and patch sources
-      # ======================================================================
-      - name: Clone and patch Bun + WebKit
-        if: steps.cache-bun.outputs.cache-hit != 'true' || steps.cache-webkit.outputs.cache-hit != 'true'
-        run: |
-          source scripts/env.sh
-          ./scripts/apply-patches.sh
-
-      # ======================================================================
-      # Build ICU with timeout protection
-      # ======================================================================
-      - name: Build ICU 75.1
-        if: steps.cache-icu.outputs.cache-hit != 'true'
-        timeout-minutes: 60
-        run: |
-          source scripts/env.sh
-          ./scripts/build-icu.sh
-
-      # ======================================================================
-      # Build WebKit/JSC with timeout protection
-      # ======================================================================
-      - name: Build WebKit/JSC
-        if: steps.cache-webkit.outputs.cache-hit != 'true'
-        timeout-minutes: 120
-        run: |
-          source scripts/env.sh
-          ./scripts/build-webkit.sh
-
-      # ======================================================================
-      # Build TinyCC (libtcc.a)
-      # ======================================================================
-      - name: Build TinyCC
-        if: steps.cache-bun.outputs.cache-hit != 'true'
-        timeout-minutes: 30
-        run: |
-          source scripts/env.sh
-          ./scripts/build-tinycc.sh
-
-      # ======================================================================
-      # Build Bun with timeout protection
-      # ======================================================================
-      - name: Build Bun
-        if: steps.cache-bun.outputs.cache-hit != 'true'
-        timeout-minutes: 120
-        run: |
-          source scripts/env.sh
-          # Need to clone + patch if only bun cache missed but webkit didn't
-          if [ ! -d "$BUN_SRC/.git" ]; then
-            ./scripts/apply-patches.sh
-          fi
-          ./scripts/build-bun.sh
-
-      - name: Verify Bun binary
-        run: |
-          BUN_BINARY="${WORK_DIR}/bun-build/bun"
-          echo "Bun binary: $BUN_BINARY"
-          ls -lh "$BUN_BINARY"
-          file "$BUN_BINARY"
-          readelf -h "$BUN_BINARY" | grep -E "Machine|Class"
-          if ! file "$BUN_BINARY" | grep -q "aarch64"; then
-            echo "ERROR: Bun binary is not ARM64 architecture"
-            exit 1
-          fi
-
-      # ======================================================================
-      # Build libopentui.so with enhanced error tracking
+      # Build libopentui.so first. It needs only Zig + NDK + OpenTUI, so a
+      # generator/API error fails in about a minute instead of after ICU,
+      # WebKit and Bun have already spent ~30 minutes.
       # ======================================================================
       - name: Build libopentui.so
         if: steps.cache-opentui.outputs.cache-hit != 'true'
@@ -361,27 +284,167 @@ jobs:
             fi
           fi
 
+      - name: Stage libopentui.so for packaging
+        run: |
+          source scripts/env.sh
+          LIB="${OPENTUI_SRC}/packages/native/lib/aarch64-linux-android/libopentui.so"
+          if [ ! -f "$LIB" ]; then
+            LIB="${OPENTUI_SRC}/packages/core/src/lib/aarch64-linux-android/libopentui.so"
+          fi
+          if [ ! -f "$LIB" ]; then
+            echo "ERROR: libopentui.so missing after build/cache restore" >&2
+            exit 1
+          fi
+          mkdir -p "${WEBKIT_OUTPUT}/lib" \
+                   "${OPENTUI_SRC}/packages/core/src/lib/aarch64-linux-android"
+          cp "$LIB" "${WEBKIT_OUTPUT}/lib/libopentui.so"
+          cp "$LIB" "${OPENTUI_SRC}/packages/core/src/lib/aarch64-linux-android/libopentui.so"
+
+      - name: Save libopentui cache
+        if: success() && steps.cache-opentui.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/opentui-src/packages/native/lib/aarch64-linux-android/libopentui.so
+          key: ${{ steps.cache-opentui.outputs.cache-primary-key }}
+
+      - name: Clone and patch Bun
+        if: steps.cache-bun.outputs.cache-hit != 'true'
+        run: |
+          source scripts/env.sh
+          ./scripts/apply-patches.sh bun
+
+      - name: Clone and patch WebKit
+        if: steps.cache-webkit.outputs.cache-hit != 'true'
+        run: |
+          source scripts/env.sh
+          ./scripts/apply-patches.sh webkit
+
+      # ======================================================================
+      # Build ICU with timeout protection
+      # ======================================================================
+      - name: Build ICU 75.1
+        if: steps.cache-icu.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        run: |
+          source scripts/env.sh
+          ./scripts/build-icu.sh
+
+      - name: Save ICU cache
+        if: success() && steps.cache-icu.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/deps-android/prefix
+          key: ${{ steps.cache-icu.outputs.cache-primary-key }}
+
+      # ======================================================================
+      # Build WebKit/JSC with timeout protection
+      # ======================================================================
+      - name: Build WebKit/JSC
+        if: steps.cache-webkit.outputs.cache-hit != 'true'
+        timeout-minutes: 120
+        run: |
+          source scripts/env.sh
+          ./scripts/build-webkit.sh
+
+      - name: Save WebKit cache
+        if: success() && steps.cache-webkit.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/webkit-android
+          key: ${{ steps.cache-webkit.outputs.cache-primary-key }}
+
+      # ======================================================================
+      # Build TinyCC (libtcc.a)
+      # ======================================================================
+      - name: Build TinyCC
+        if: steps.cache-bun.outputs.cache-hit != 'true'
+        timeout-minutes: 30
+        run: |
+          source scripts/env.sh
+          ./scripts/build-tinycc.sh
+
+      # ======================================================================
+      # Build Bun with timeout protection
+      # ======================================================================
+      - name: Build Bun
+        if: steps.cache-bun.outputs.cache-hit != 'true'
+        timeout-minutes: 120
+        env:
+          ZIG_CACHE_REUSE: ${{ steps.cache-zig.outputs.cache-hit }}
+        run: |
+          source scripts/env.sh
+          # Need to clone + patch if only bun cache missed but webkit didn't
+          if [ ! -d "$BUN_SRC/.git" ]; then
+            ./scripts/apply-patches.sh bun
+          fi
+          ./scripts/build-bun.sh
+
+      - name: Verify Bun binary
+        run: |
+          BUN_BINARY="${WORK_DIR}/bun-build/bun"
+          echo "Bun binary: $BUN_BINARY"
+          ls -lh "$BUN_BINARY"
+          file "$BUN_BINARY"
+          readelf -h "$BUN_BINARY" | grep -E "Machine|Class"
+          if ! file "$BUN_BINARY" | grep -q "aarch64"; then
+            echo "ERROR: Bun binary is not ARM64 architecture"
+            exit 1
+          fi
+
+      - name: Save Bun binary cache
+        if: success() && steps.cache-bun.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/bun-build/bun
+          key: ${{ steps.cache-bun.outputs.cache-primary-key }}
+
+      - name: Save Zig build cache
+        if: success() && steps.cache-bun.outputs.cache-hit != 'true' && steps.cache-zig.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/bun-build/cache/zig
+          key: ${{ steps.cache-zig.outputs.cache-primary-key }}
+
       # ======================================================================
       # Build OpenCode standalone binary
+      - name: Clone OpenCode source
+        run: |
+          source scripts/env.sh
+          if [ ! -d "$OPENCODE_SRC/.git" ]; then
+            git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "$OPENCODE_SRC"
+          fi
+
+      - name: Restore OpenCode node_modules cache
+        id: cache-opencode-deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/opencode-src/node_modules
+            ~/.bun/install/cache
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-${{ hashFiles('build/opencode-src/bun.lock*', 'build/opencode-src/package.json', 'scripts/build-opencode.sh') }}
+
       # ======================================================================
       - name: Build OpenCode standalone binary
-        if: steps.cache-opencode-deps.outputs.cache-hit != 'true'
         timeout-minutes: 60
         run: |
           source scripts/env.sh
           ./scripts/build-opencode.sh
 
-      - name: Ensure OpenCode source exists for verification
-        if: steps.cache-opencode-deps.outputs.cache-hit == 'true'
-        run: |
-          source scripts/env.sh
-          if [ ! -d "${OPENCODE_SRC}/.git" ]; then
-            echo ">>> Cloning OpenCode for verification..."
-            git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "${OPENCODE_SRC}"
-          fi
+      - name: Save OpenCode node_modules cache
+        if: success() && steps.cache-opencode-deps.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/opencode-src/node_modules
+            ~/.bun/install/cache
+          key: ${{ steps.cache-opencode-deps.outputs.cache-primary-key }}
 
-      # ======================================================================
-      # Verify native packages (after OpenCode is built/installed)
       # ======================================================================
       - name: Verify native packages
         run: |
@@ -519,9 +582,8 @@ jobs:
           rm -rf "${WORK_DIR}/bun-src" "${WORK_DIR}/webkit-src" "${WORK_DIR}/opentui-src" "${WORK_DIR}/opencode-src"
           rm -rf "${WORK_DIR}/icu-src" "${WORK_DIR}/icu-host-build" "${WORK_DIR}/icu-android-build"
           rm -rf "${WORK_DIR}/webkit-build"
-          # Clear Zig cache when bun-src is removed — the cache references files
-          # in vendor/zig/ which lives inside bun-src. Stale references cause
-          # FileNotFound errors in the translate-c output cache.
+          # The Zig cache was saved after Verify Bun; remove the local copy to
+          # free disk. The remote cache is keyed by Bun/Zig versions + patch.
           rm -rf "${WORK_DIR}/bun-build/cache/zig"
           echo "Cleaned up intermediate files"
           df -h "${WORK_DIR}" || true

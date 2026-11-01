@@ -82,7 +82,7 @@ fi
 # 4. Resolve Bun Workspace Dependencies & Catalog Resolution Fallbacks
 echo ">>> Installing OpenCode dependencies via Bun..."
 cd "${OPENCODE_DIR}"
-bun install --no-cache || {
+bun install || {
   echo "[!] Bun catalog resolution warning detected; forcing package resolution..."
   bun install --force
 }

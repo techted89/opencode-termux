@@ -163,17 +163,17 @@ echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
 # Install without --ignore-scripts to ensure optional native packages are installed
 # Use --platform and --arch to ensure all platform-specific native packages are available
-"$HOST_BUN" install --no-cache
+"$HOST_BUN" install
 
-# Also explicitly install the ARM64 native package for the libopentui.so swap
-# This ensures @opentui/core-linux-arm64 is available even on x64 host
-echo ">>> Installing ARM64 native package..."
-"$HOST_BUN" add -D @opentui/core-linux-arm64@0.5.10 --no-cache 2>/dev/null || true
-# Ensure x64 native package is installed for the libopentui.so swap
-"$HOST_BUN" add -D @opentui/core-linux-x64@0.5.10 --no-cache 2>/dev/null || true
-# Also install musl variants to avoid resolution errors during bundling
-"$HOST_BUN" add -D @opentui/core-linux-arm64-musl@0.5.10 --no-cache 2>/dev/null || true
-"$HOST_BUN" add -D @opentui/core-linux-x64-musl@0.5.10 --no-cache 2>/dev/null || true
+# One resolution pass for all OpenTUI variants. The workflow caches Bun's
+# install cache; --no-cache forced a fresh network fetch on every run.
+echo ">>> Installing OpenTUI native packages..."
+"$HOST_BUN" add -D \
+    @opentui/core-linux-arm64@0.5.10 \
+    @opentui/core-linux-x64@0.5.10 \
+    @opentui/core-linux-arm64-musl@0.5.10 \
+    @opentui/core-linux-x64-musl@0.5.10 \
+    2>/dev/null || true
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"
