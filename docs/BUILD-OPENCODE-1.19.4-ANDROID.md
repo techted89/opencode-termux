@@ -23,13 +23,13 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 `README.md` and design notes (context, sometimes stale). See
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
-**Status.** OpenTUI now builds in CI. Runs #41280310141 through #41281683381 fixed ghostty
-patch application, the vendored uucode package, the zlib URL, ghostty's missing
-`wuffs`/`simdutf`/`highway`/`translate-c` path dependencies and the undeclared `-Dstrip`
-flag. Run #41281683381 passed `Build libopentui.so`, `Verify libopentui.so`, staging and the
-OpenTUI cache save. It then failed in `Clone and patch Bun`: the patch applies, but the
-marker check resolved the relative `$BUN_SRC` after `cd` into the Bun tree; that is fixed
-here. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
+**Status.** Every native stage is now green in CI. Run #41281683381 built, verified and
+cached `libopentui.so`; run #41282039365 restored that cache (skipping the Zig build) and then
+built, verified and cached ICU 75.1, WebKit/JSC, TinyCC and the Android Bun binary. Its
+failure is now in the last stage, `Build OpenCode standalone binary`: `bun install` aborts
+with `"git clone" for "@types/bun" failed` because Bun 1.2.13 cannot parse the `catalog:`
+entries in OpenCode's committed `bun.lock`. `build-opencode.sh` now discards the lockfile so
+Bun resolves the rewritten manifests; reproduced and fixed locally with Bun 1.2.13. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
 diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it
 and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
@@ -2192,10 +2192,12 @@ compiler test — not from log lines. Anything that would need log text is marke
 | #13–#57 | 2026-10-27/30 | **mostly success**, with path/format fixes in between |
 | #58–#76 | 2026-10-31 | mixed; OpenTUI and Zig work dominates |
 | #77–#86 | 2026-10-31 → 11-01 | **all fail** at `Build libopentui.so` |
-| #87 | 2026-11-01 05:20 | in progress on `0332673` (one commit newer than the local checkout) |
+| #87–#92 | 2026-11-01 | OpenTUI fixes; first green OpenTUI at #41281683381 |
+| #93 | 2026-11-01 06:44 | ICU, WebKit, TinyCC and Bun all green; OpenCode install fails (#41282039365) |
 
-Totals: 87 runs, 44 non-success (including three cancelled). The important signal is not the
-count but the streak: ten consecutive runs fail at the same step, all within ~12 seconds.
+The important signal is not the count but the shape: a twelve-second OpenTUI failure streak
+was finally broken in #41281683381, after which the pipeline advanced through every native
+stage in a single run.
 
 ### 24.3 Where the time goes (run #86)
 
@@ -2314,6 +2316,16 @@ cleanly (33 files), but the marker assertion then failed because it used the rel
 `$BUN_SRC/src/env.zig` *after* `cd "$BUN_SRC"`, so the path resolved inside the Bun tree. The
 script now returns to `$REPO_ROOT` before the assertion.
 
+Run #41282039365 then cleared every native stage — ICU, WebKit/JSC, TinyCC and Bun — and
+stopped in `Build OpenCode standalone binary`. The manifest rewrite above removed
+`@types/bun` from every `package.json`, but `bun install` still aborted with
+`error: "git clone" for "@types/bun" failed`, and scrubbing those entries moved the failure
+to `@types/node`. OpenCode's committed `bun.lock` stores `"@types/bun": "catalog:"` in about
+thirty workspace entries, and Bun 1.2.13 treats the unknown `catalog:` protocol as a Git
+spec. Deleting the lockfile makes Bun resolve the rewritten manifests (verified locally: 513
+packages installed in 5.8 s with a warm install cache), so `build-opencode.sh` now removes
+`bun.lock`/`bun.lockb` before installing.
+
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
 pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
@@ -2326,6 +2338,7 @@ OpenTUI's `build.zig`.
 |---|---|---|---|
 | Environment/path assumption | relative `WORK_DIR`, `cd /tmp` breaking `ZIG_DIR` | one `abspath()` helper, absolute paths everywhere | re-running with different CWD |
 | Package-manager protocol mismatch | `catalog:` on Bun 1.2.13 | rewrite manifests before install | upgrading host Bun to 1.4.4 |
+| Package-manager lockfile protocol | `bun.lock` keeps `"@types/bun": "catalog:"` after the manifests are rewritten (run #41282039365) | delete the lockfile so Bun re-resolves the patched manifests | scrubbing individual entries (the failure moved to `@types/node`) |
 | Hand-encoded dependency hash | ghostty `zlib` (12 attempts) | `zig fetch <url>` and paste its output | guessing hex/base32/base64 variants |
 | Unstable dependency URL | zlib.net served `text/html` to the runner (run #41280877999) | pin the GitHub release asset, byte-identical per `zig fetch` | trusting HTTP 200 for a binary download |
 | Incomplete vendored manifest | OpenTUI's `ghostty-build.zig.zon` omitted `wuffs`, then `simdutf`/`highway` (run #41281095820 and local evaluation) | copy the `pkg/*` shims and declare them as upstream ghostty does | adding only the first missing dependency |
@@ -2371,9 +2384,9 @@ OpenTUI's `build.zig`.
 
 ### 24.8 Open items from the audit
 
-- OpenTUI is green as of run #41281683381. Continue the pipeline: after the Bun patch-path
-  fix, confirm `Clone and patch WebKit`, the cached ICU/WebKit/Bun stages, and that a warm
-  run reuses the OpenTUI cache.
+- All native artifacts are green as of run #41282039365. The next step is the OpenCode
+  bundle and transplant (`Build OpenCode standalone binary`), now that the lockfile is
+  discarded. After it passes, confirm packaging and artifact upload.
 - Ghostty patch markers are now asserted in `build-opentui.sh`; re-verify them after any
   OpenTUI or ghostty vendor bump, including the `git init` fix and the regenerated metallib
   patch context.

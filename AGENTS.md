@@ -54,17 +54,17 @@ This repository cross-compiles OpenCode for Android/Termux (aarch64) using GitHu
 ## Common Failure Modes & Fixes
 
 ### 1. `@types/bun` git clone failure in CI
-**Symptom**: `error: "git clone" for "@types/bun" failed`
-**Fix**: Pre-install globally in workflow before `bun install`:
-```yaml
-- run: bun add -g @types/bun@1.2.13
-```
+**Symptom**: `error: "git clone" for "@types/bun" failed` (or `@types/node`)
+**Root cause**: Bun 1.2.13 cannot parse the `catalog:` entries in OpenCode's `bun.lock`
+and treats the unknown protocol as a Git spec. Rewriting `package.json` alone is not enough.
+**Fix**: `build-opencode.sh` deletes `bun.lock`/`bun.lockb` before `bun install`; the global
+`@types/bun` pre-install in the workflow is only a belt-and-braces measure.
 
 ### 2. ARM64 `libopentui.so` missing or wrong architecture
 **Symptom**: `WARNING: ARM64 libopentui.so not found... keeping x86_64 version`
 **Root cause**: Zig build didn't produce ARM64 artifact, or path mismatch
 **Fix**: 
-- Build with `-Dlibrary-target=aarch64-linux-android -Doptimize=ReleaseSafe -Dstrip=true`
+- Build with `-Dlibrary-target=aarch64-linux-android -Doptimize=ReleaseSafe` (OpenTUI 0.5.10 has no `strip` option)
 - Verify output at `packages/native/lib/aarch64-linux-android/libopentui.so`
 - Copy to `packages/core/src/lib/aarch64-linux-android/` and `webkit-android/lib/`
 - Verify with `file` (must show `aarch64`) and `readelf -d` (must have `NEEDED libc.so`)

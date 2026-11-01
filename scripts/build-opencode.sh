@@ -161,8 +161,20 @@ OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
-# Install without --ignore-scripts to ensure optional native packages are installed
-# Use --platform and --arch to ensure all platform-specific native packages are available
+
+# Bun 1.2.13 cannot parse the `catalog:` entries in OpenCode's committed bun.lock:
+# it treats the unknown protocol as a Git spec and aborts with
+#   error: "git clone" for "@types/bun" failed
+# even after the manifests above are rewritten (run 41282039365). Scrubbing single
+# lockfile entries only moved the failure to @types/node, so discard the lockfile and
+# let Bun resolve the rewritten manifests. Verified locally with Bun 1.2.13.
+for lockfile in bun.lock bun.lockb bun.lock.json; do
+    if [ -f "$lockfile" ]; then
+        echo ">>> Removing $lockfile (Bun 1.2.13 cannot resolve catalog: entries)"
+        rm -f "$lockfile"
+    fi
+done
+
 "$HOST_BUN" install
 
 # One resolution pass for all OpenTUI variants. The workflow caches Bun's

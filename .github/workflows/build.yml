@@ -428,7 +428,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/opencode-src/node_modules
             ~/.bun/install/cache
-          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-${{ hashFiles('build/opencode-src/bun.lock*', 'build/opencode-src/package.json', 'scripts/build-opencode.sh') }}
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-opencode-deps-${{ env.OPENCODE_VERSION }}-${{ env.BUN_VERSION }}-${{ hashFiles('build/opencode-src/bun.lock*', 'build/opencode-src/package.json', 'scripts/build-opencode.sh', 'scripts/build-opencode-android.ts', 'scripts/transplant-bun-graph.py') }}
 
       # ======================================================================
       - name: Build OpenCode standalone binary
