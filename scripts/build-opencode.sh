@@ -179,32 +179,9 @@ done
 
 # One resolution pass for all OpenTUI variants. The workflow caches Bun's
 # install cache; --no-cache forced a fresh network fetch on every run.
-# Bun 1.2.13 records platform-specific optional packages but refuses to unpack
-# ones whose "os"/"cpu" do not match the runner, so `bun add
-# @opentui/core-linux-arm64` silently leaves node_modules empty on x86_64. The
-# bundler still resolves every literal dynamic import in @opentui/core's platform
-# loader, so provide a resolvable module for the platforms this build does not
-# run on. The arm64 stub returns $OPENTUI_LIB_PATH at runtime; the launcher sets
-# that to the packaged libopentui.so. The host's linux-x64 package stays real.
-OPENTUI_CORE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
-    "$OPENCODE_SRC_ABS/node_modules/@opentui/core/package.json")"
-echo ">>> Creating @opentui/core platform stubs (core ${OPENTUI_CORE_VERSION})..."
-for platform in darwin-x64 darwin-arm64 linux-arm64 linux-x64-musl linux-arm64-musl win32-x64 win32-arm64; do
-    stub_dir="$OPENCODE_SRC_ABS/node_modules/@opentui/core-${platform}"
-    mkdir -p "$stub_dir"
-    printf 'export default process.env.OPENTUI_LIB_PATH || ""\n' > "$stub_dir/index.js"
-    cp "$stub_dir/index.js" "$stub_dir/index.bun.js"
-    cat > "$stub_dir/package.json" <<STUB
-{
-  "name": "@opentui/core-${platform}",
-  "version": "${OPENTUI_CORE_VERSION}",
-  "type": "module",
-  "main": "index.js",
-  "module": "index.js",
-  "exports": { ".": { "bun": "./index.bun.js", "import": "./index.js" } }
-}
-STUB
-done
+# Non-host @opentui/core-* imports are redirected by a Bun build plugin in
+# build-opencode-android.ts (Bun 1.3.x installs workspace dependencies in an
+# isolated layout, so node_modules stubs would not be resolvable anyway).
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD_ABS/bun"

@@ -107,6 +107,28 @@ console.log("\n=== Step 3: Bundling OpenCode ===")
 
 const plugin = createSolidTransformPlugin()
 
+// @opentui/core contains a literal dynamic import for every platform package.
+// Bun will not install packages whose os/cpu do not match the runner, and 1.3.x
+// uses an isolated node_modules layout, so filesystem stubs are not reliable.
+// Redirect the non-host platform imports to a module that resolves the packaged
+// library at runtime; the launcher exports OPENTUI_LIB_PATH for it.
+const opentuiPlatformStub = {
+  name: "opentui-platform-stub",
+  setup(build: any) {
+    build.onResolve(
+      {
+        filter:
+          /^@opentui\/core-(darwin-x64|darwin-arm64|linux-arm64|linux-x64-musl|linux-arm64-musl|win32-x64|win32-arm64)$/,
+      },
+      (args: any) => ({ path: args.path, namespace: "opentui-platform-stub" }),
+    )
+    build.onLoad({ filter: /.*/, namespace: "opentui-platform-stub" }, () => ({
+      contents: 'export default process.env.OPENTUI_LIB_PATH || ""',
+      loader: "js" as const,
+    }))
+  },
+}
+
 // Find parser.worker.js
 const localPath = path.resolve(OPENCODE_DIR, "node_modules/@opentui/core/parser.worker.js")
 const rootPath = path.resolve(OPENCODE_DIR, "../../node_modules/@opentui/core/parser.worker.js")
@@ -138,7 +160,7 @@ const result = await Bun.build({
   target: "bun",
   conditions: ["bun"],
   tsconfig: "./tsconfig.json",
-  plugins: [plugin],
+  plugins: [plugin, opentuiPlatformStub],
   compile: {
     autoloadBunfig: false,
     autoloadDotenv: false,

@@ -2335,10 +2335,11 @@ Run #41319756768 then installed dependencies successfully and failed in the bund
 moved the TUI worker to `packages/opencode/src/cli/tui/worker.ts`. The same run could not
 resolve `@opentui/core-darwin-x64` and its siblings: `bun add` records platform-specific
 optional packages but does not unpack ones whose `os`/`cpu` do not match the runner, and the
-bundler resolves every literal dynamic import in `@opentui/core`'s platform loader. The build
-script now writes minimal stubs for the seven non-host platform packages; the arm64 stub
-exports `process.env.OPENTUI_LIB_PATH`, which the launcher points at the packaged
-`libopentui.so`.
+bundler resolves every literal dynamic import in `@opentui/core`'s platform loader. A Bun
+build plugin now redirects the seven non-host platform imports to a stub that exports
+`process.env.OPENTUI_LIB_PATH`, which the launcher points at the packaged `libopentui.so`.
+(Bun 1.3.2 installs workspace dependencies in an isolated layout, so there is no root
+`node_modules/@opentui/core` to modify.)
 
 Run #41320411660 then bundled successfully but produced no host binary: Bun 1.2.13's
 `Bun.build` silently ignores `compile` and returns success without writing the outfile. Bun
