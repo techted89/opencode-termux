@@ -24,15 +24,16 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
 **Status.** The v1 engine has produced working artifacts (successful CI runs through #57),
-but the current head is **not green**. Runs #41280310141, #41280659177 and #41280877999
-confirmed the ghostty patch fixes and exposed three defects in the vendored OpenTUI
-dependencies, all fixed here: the hand-written `uucode-ghostty/build.zig` did not implement the
-interface ghostty requests (`-Dbuild_config_path`, `-Dtables_path`,
-`namedLazyPath("tables.zig")`, `module("uucode")`); the workflow pre-created that directory so
-the extraction was skipped; and zlib.net answered the runner with an HTML page instead of the
-tarball. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run
-data, diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside
-it and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
+but the current head is **not green**. Runs #41280310141 through #41281095820 confirmed the
+ghostty patch fixes and exposed four defects in the vendored OpenTUI dependencies, all fixed
+here: the hand-written `uucode-ghostty/build.zig` did not implement the interface ghostty
+requests (`-Dbuild_config_path`, `-Dtables_path`, `namedLazyPath("tables.zig")`,
+`module("uucode")`); the workflow pre-created that directory so the extraction was skipped;
+zlib.net answered the runner with an HTML page; and the vendored ghostty `build.zig.zon`
+omitted the `wuffs`/`translate-c` path dependencies that Kitty graphics needs on Android.
+[§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
+diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it
+and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
 ---
 
@@ -1504,7 +1505,7 @@ specific vendored trees. `build-opentui.sh` reconstructs them:
 | `yoga` | `facebook/yoga` v3.2.1 tarball | required by the layout engine |
 | `uucode-opentui` | `jacobsandlund/uucode` @ `8ad04b75…` | unicode tables |
 | `uucode-ghostty` | `jacobsandlund/uucode` @ `9d555245…` | ghostty's copy; its **upstream** `build.zig`/`build.zig.zon` are installed, because ghostty's `SharedDeps.init` needs their options (`-Dbuild_config_path`, `-Dtables_path`) and named lazy path `tables.zig` |
-| `ghostty` | `ghostty-org/ghostty` @ `aeda37b3…` | only `include/`, `src/`, `pkg/android-ndk`, `pkg/apple-sdk`, `LICENSE` are kept; `src/font/res` is dropped; its `build.zig`/`.zon` are fetched from OpenTUI's vendor directory and patched |
+| `ghostty` | `ghostty-org/ghostty` @ `aeda37b3…` | only `include/`, `src/`, `pkg/android-ndk`, `pkg/apple-sdk`, `pkg/translate-c`, `pkg/wuffs`, `pkg/highway`, `pkg/simdutf`, `LICENSE` are kept; `src/font/res` is dropped; its `build.zig`/`.zon` are fetched from OpenTUI's vendor directory and patched |
 
 The build also patches `ghostty/build.zig.zon` to add a `zlib` dependency when it is missing,
 and applies `ghostty-android-metallib.patch` so the non-Apple build does not create a Metal
@@ -2290,6 +2291,21 @@ at the GitHub release asset for v1.3.1; `zig fetch` reports the same hash
 (`N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8`) as the fossil tarball, so the pinned
 bytes are unchanged.
 
+A fourth defect followed in run #41281095820: `GhosttyZig.initVt` wires wuffs in whenever
+Kitty graphics is enabled, which it is for a lib artifact on Android (only freestanding
+targets force it off). OpenTUI's vendored `ghostty-build.zig.zon` omitted ghostty's own path
+dependencies, so Zig panicked with `no dependency named 'wuffs'`. The build now copies
+`pkg/wuffs` and `pkg/translate-c` from the pinned ghostty tarball and declares
+`.wuffs = .{ .path = "./pkg/wuffs", .lazy = true }` and
+`.translate_c = .{ .path = "./pkg/translate-c" }` in the vendored zon. Both shims fetch their
+own C sources by URL and hash, so nothing else is vendored.
+
+The same manifest gap covers SIMD: `SharedDeps.addSimd` unconditionally asks for `simdutf` and
+`highway` when `Config.simd` is set, which it is for this build. Evaluating the patched tree
+with Zig 0.16.0 therefore panicked next on `simdutf`, so `pkg/simdutf` and `pkg/highway` are
+vendored and declared as lazy path dependencies too. The shims fetch their own sources by URL
+and hash, and the local evaluation reaches ghostty's module graph with all four declared.
+
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
 pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
@@ -2304,6 +2320,7 @@ OpenTUI's `build.zig`.
 | Package-manager protocol mismatch | `catalog:` on Bun 1.2.13 | rewrite manifests before install | upgrading host Bun to 1.4.4 |
 | Hand-encoded dependency hash | ghostty `zlib` (12 attempts) | `zig fetch <url>` and paste its output | guessing hex/base32/base64 variants |
 | Unstable dependency URL | zlib.net served `text/html` to the runner (run #41280877999) | pin the GitHub release asset, byte-identical per `zig fetch` | trusting HTTP 200 for a binary download |
+| Incomplete vendored manifest | OpenTUI's `ghostty-build.zig.zon` omitted `wuffs`, then `simdutf`/`highway` (run #41281095820 and local evaluation) | copy the `pkg/*` shims and declare them as upstream ghostty does | adding only the first missing dependency |
 | Build-API drift | Zig 0.15 vs 0.16 vs 0.17 `build.zig` | pin Zig, validate generated scripts, consult `lib/std/Build.zig` | changing the Zig version |
 | Hidden patch failure | `git apply … || true` for ghostty | fail on patch mismatch, or assert the expected symbol | continuing with a half-patched tree |
 | Patch applied to the wrong tree | `git apply` inside `build/…/ghostty` skipped everything and exited 0 | `git init` the vendor tree; treat `Skipped patch` as an error | trusting `git apply` exit status alone |
@@ -2353,3 +2370,7 @@ OpenTUI's `build.zig`.
 - `uucode-ghostty` no longer has a hand-written `tables.zig`; ghostty's dependency request
   (`namedLazyPath("tables.zig")` → `module("uucode")`) is served by the package's own
   generator, and `build-opentui.sh` asserts the option and named-path contract after install.
+- Kitty graphics pulls `wuffs` and `pkg/translate-c` into the Android build, and SIMD pulls
+  `pkg/simdutf` and `pkg/highway`. If C/C++ compilation is the next failure, the alternatives
+  are to build ghostty-vt with `kitty_graphics` disabled or `simd` off instead of vendoring
+  more of `pkg/`.

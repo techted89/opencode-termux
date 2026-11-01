@@ -211,6 +211,14 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     rm -rf "$OPENTUI_ZIG_DEPS/ghostty/src/font/res"
     cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/android-ndk" "$OPENTUI_ZIG_DEPS/ghostty/pkg/android-ndk"
     cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/apple-sdk" "$OPENTUI_ZIG_DEPS/ghostty/pkg/apple-sdk"
+    # Kitty graphics is enabled for lib artifacts on Android, and GhosttyZig
+    # wires wuffs in for it; the wuffs shim itself imports translate-c. SIMD is
+    # enabled too, and addSimd unconditionally asks for simdutf and highway.
+    # All four path dependencies must be present (runs 41281095820 and later).
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/translate-c" "$OPENTUI_ZIG_DEPS/ghostty/pkg/translate-c"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/wuffs" "$OPENTUI_ZIG_DEPS/ghostty/pkg/wuffs"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/highway" "$OPENTUI_ZIG_DEPS/ghostty/pkg/highway"
+    cp -r "$WORK_DIR_ABS/ghostty-staging/pkg/simdutf" "$OPENTUI_ZIG_DEPS/ghostty/pkg/simdutf"
     # Custom ghostty build files from opentui vendor
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig"
     curl -fsSL "https://raw.githubusercontent.com/anomalyco/opentui/v0.5.10/packages/native/src/vendor/zig-deps/ghostty-build.zig.zon" -o "$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
@@ -231,31 +239,49 @@ fi
 # Ensure uucode-ghostty directory exists (from reference guide)
 mkdir -p "$OPENTUI_ZIG_DEPS/uucode-ghostty"
 
-# Patch ghostty build.zig.zon for zlib dependency (from reference guide)
+# Patch ghostty build.zig.zon: the manifest vendored by OpenTUI omits ghostty's
+# own path dependencies. GhosttyZig.initVt needs wuffs whenever Kitty graphics
+# is enabled, which it is for lib artifacts on Android (only freestanding
+# targets force it off), and the wuffs shim imports translate-c (run
+# 41281095820). zlib is URL-pinned because the vendored zon has no pkg/zlib
+# entry; zlib.net served the runner HTML, so the GitHub release asset is used
+# instead (same bytes, verified with `zig fetch`).
 GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/ghostty/build.zig.zon"
 if [ -f "$GHOSTTY_ZON" ]; then
-    if ! grep -q "zlib" "$GHOSTTY_ZON"; then
-        echo ">>> Patching ghostty build.zig.zon for zlib..."
-        python3 - "$GHOSTTY_ZON" <<'PYEOF'
+    echo ">>> Patching ghostty build.zig.zon with vendored dependencies..."
+    python3 - "$GHOSTTY_ZON" <<'PYEOF'
 import sys
+
 zon_path = sys.argv[1]
 with open(zon_path, "r") as f:
     content = f.read()
-# zlib.net answered the GitHub runner with an HTML page (run 41280877999).
-# The GitHub release asset is the same verified tarball: `zig fetch` reports
-# the identical hash for both.
-zlib_dep = """
-    .zlib = .{
-        .url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",
-        .hash = "N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8",
-    },
-"""
-content = content.replace(".dependencies = .{", ".dependencies = .{" + zlib_dep)
-with open(zon_path, "w") as f:
-    f.write(content)
-print("Patched ghostty build.zig.zon with zlib dependency")
+
+deps = {
+    "wuffs": '    .wuffs = .{ .path = "./pkg/wuffs", .lazy = true },\n',
+    "simdutf": '    .simdutf = .{ .path = "./pkg/simdutf", .lazy = true },\n',
+    "highway": '    .highway = .{ .path = "./pkg/highway", .lazy = true },\n',
+    "translate_c": '    .translate_c = .{ .path = "./pkg/translate-c" },\n',
+    "zlib": (
+        '    .zlib = .{\n'
+        '        .url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",\n'
+        '        .hash = "N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8",\n'
+        '    },\n'
+    ),
+}
+
+missing = [name for name in deps if f".{name} = " not in content]
+if missing:
+    marker = ".dependencies = .{"
+    if marker not in content:
+        print("ERROR: ghostty build.zig.zon has no dependencies block", file=sys.stderr)
+        sys.exit(1)
+    content = content.replace(marker, marker + "".join(deps[name] for name in missing), 1)
+    with open(zon_path, "w") as f:
+        f.write(content)
+    print("Added ghostty dependencies: " + ", ".join(missing))
+else:
+    print("ghostty dependencies already present")
 PYEOF
-    fi
 fi
 
 # Create merged bionic sysroot with shimmed C headers (required by the
