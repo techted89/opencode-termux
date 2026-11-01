@@ -156,61 +156,45 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-ghostty" ]; then
     rm -f "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
 fi
 
-# Create build.zig for uucode-ghostty (always recreate to ensure correct content)
+# uucode-ghostty must be the real uucode package, not a hand-written stub.
+# ghostty's SharedDeps.init asks the dependency for `.build_config_path`,
+# `namedLazyPath("tables.zig")` and `module("uucode")`; only uucode's own
+# build.zig declares those options and named paths. The stub that used to live
+# here accepted only the standard options, so run 41280310141 failed with
+# "invalid option: -Dbuild_config_path" and "unable to find named lazypath
+# 'tables.zig'". The archive is already pinned by commit, so re-fetching the
+# build files from that same commit keeps them from drifting.
+UUCODE_GHOSTTY_COMMIT="9d55524551411b493cca41ca06363625d90aff1e"
 UUCOD_GHOSTTY_BUILD="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig"
-echo ">>> Creating build.zig for uucode-ghostty..."
-cat > "$UUCOD_GHOSTTY_BUILD" <<'ZIG_EOF'
-const std = @import("std");
+UUCOD_GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig.zon"
+echo ">>> Installing upstream build files for uucode-ghostty..."
+for build_file in build.zig build.zig.zon; do
+    curl -fsSL "https://raw.githubusercontent.com/jacobsandlund/uucode/${UUCODE_GHOSTTY_COMMIT}/${build_file}" \
+        -o "$OPENTUI_ZIG_DEPS/uucode-ghostty/${build_file}"
+done
 
-pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    // Zig 0.16: addLibrary takes a *Module, not a path, and LibraryOptions has no
-    // .target/.optimize fields. Those belong on the module created here.
-    const module = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const lib = b.addLibrary(.{
-        .name = "uucode",
-        .root_module = module,
-        .linkage = .dynamic,
-        .version = .{ .major = 0, .minor = 1, .patch = 0 },
-    });
-    b.installArtifact(lib);
-
-    // Export tables.zig for ghostty's dependency path lookup. (The old
-    // b.installLazyPath call does not exist in Zig 0.16.)
-    b.installFile("src/tables.zig", "tables.zig");
-}
-ZIG_EOF
-
-# Validate the generated build script before spending time on the real build.
-# A Zig API mismatch fails here in about a second instead of as an opaque
-# "Build libopentui.so" failure (see docs section 24).
-echo ">>> Validating generated uucode-ghostty/build.zig..."
-if ! (cd "$OPENTUI_ZIG_DEPS/uucode-ghostty" && "$ZIG_BIN_ABS" build --help >/dev/null 2>&1); then
-    echo "ERROR: generated build.zig does not evaluate with $( "$ZIG_BIN_ABS" version )."
+# Validate the dependency interface before spending time on the real build. A
+# Zig API mismatch fails here instead of as an opaque "Build libopentui.so"
+# failure (see docs section 24).
+echo ">>> Validating uucode-ghostty/build.zig..."
+if ! UUCODE_HELP="$(cd "$OPENTUI_ZIG_DEPS/uucode-ghostty" && "$ZIG_BIN_ABS" build --help 2>&1)"; then
+    echo "ERROR: uucode-ghostty/build.zig does not evaluate with $( "$ZIG_BIN_ABS" version )."
     echo "       This is a Zig build API change, not a network or NDK problem."
-    (cd "$OPENTUI_ZIG_DEPS/uucode-ghostty" && "$ZIG_BIN_ABS" build --help) 2>&1 | head -20 || true
+    printf '%s\n' "$UUCODE_HELP" | head -20 >&2 || true
     exit 1
 fi
-
-# Create build.zig.zon for uucode-ghostty (always recreate to ensure correct content)
-UUCOD_GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig.zon"
-echo ">>> Creating build.zig.zon for uucode-ghostty..."
-cat > "$UUCOD_GHOSTTY_ZON" <<'ZON_EOF'
-.{
-    .name = .uucode,
-    .version = "0.1.0",
-    .fingerprint = 0x8d4ebdea5541ef31,
-    .paths = .{"src"},
-    .dependencies = .{},
-}
-ZON_EOF
+for option in build_config_path tables_path; do
+    if ! grep -qF -- "-D${option}" <<<"$UUCODE_HELP"; then
+        echo "ERROR: uucode-ghostty/build.zig no longer declares -D${option}." >&2
+        echo "       ghostty's SharedDeps.init passes it; update the pinned uucode commit." >&2
+        exit 1
+    fi
+done
+if ! grep -qF 'addNamedLazyPath("tables.zig"' "$UUCOD_GHOSTTY_BUILD"; then
+    echo "ERROR: uucode-ghostty/build.zig no longer exports named lazypath tables.zig." >&2
+    echo "       ghostty's SharedDeps.init requires it; update the pinned uucode commit." >&2
+    exit 1
+fi
 
 if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     echo ">>> Downloading ghostty zig dependency..."

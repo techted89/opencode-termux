@@ -24,11 +24,14 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
 **Status.** The v1 engine has produced working artifacts (successful CI runs through #57),
-but the current head is **not green**: runs #77–#86 all fail during `Build libopentui.so`,
-because the generated `uucode-ghostty/build.zig` uses Zig APIs that do not exist in 0.16.
-[§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
-diagnosis and the fix applied here. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it
-and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
+but the current head is **not green**. Run #41280310141 confirmed the ghostty patch fixes:
+both vendor patches applied, asserted their markers and re-applied idempotently. It then
+failed one stage later, in OpenTUI's dependency graph, because the hand-written
+`uucode-ghostty/build.zig` did not implement the interface ghostty requests
+(`-Dbuild_config_path`, `-Dtables_path`, `namedLazyPath("tables.zig")`, `module("uucode")`).
+That stub is replaced by the pinned upstream build files. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker)
+has the run data, diagnosis and remaining open items. The v2 pipeline (`opencode2`,
+Bun 1.4.2) lives beside it and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
 ---
 
@@ -1499,7 +1502,7 @@ specific vendored trees. `build-opentui.sh` reconstructs them:
 |---|---|---|
 | `yoga` | `facebook/yoga` v3.2.1 tarball | required by the layout engine |
 | `uucode-opentui` | `jacobsandlund/uucode` @ `8ad04b75…` | unicode tables |
-| `uucode-ghostty` | `jacobsandlund/uucode` @ `9d555245…` | ghostty's copy; `build.zig`/`build.zig.zon` are **generated** for the Zig 0.16 API |
+| `uucode-ghostty` | `jacobsandlund/uucode` @ `9d555245…` | ghostty's copy; its **upstream** `build.zig`/`build.zig.zon` are installed, because ghostty's `SharedDeps.init` needs their options (`-Dbuild_config_path`, `-Dtables_path`) and named lazy path `tables.zig` |
 | `ghostty` | `ghostty-org/ghostty` @ `aeda37b3…` | only `include/`, `src/`, `pkg/android-ndk`, `pkg/apple-sdk`, `LICENSE` are kept; `src/font/res` is dropped; its `build.zig`/`.zon` are fetched from OpenTUI's vendor directory and patched |
 
 The build also patches `ghostty/build.zig.zon` to add a `zlib` dependency when it is missing
@@ -2221,58 +2224,52 @@ skipped, and no artifact is produced.
 Pattern: most "fix" commits changed one API name, pushed, and waited ~40 minutes for CI to
 fail again at the same step. The failure signatures were never captured in the repository.
 
-### 24.5 The current blocker, reproduced locally
+### 24.5 The OpenTUI dependency-graph blocker
 
-The generated `uucode-ghostty/build.zig` (written by `build-opentui.sh`) targets an API that
-does not exist in Zig 0.16.0. The checked-in generator and the newer remote commit both fail:
+Run #41280310141 cleared the ghostty patch stage and failed while Zig evaluated OpenTUI's
+`build.zig`, before compiling anything:
+
+```text
+error: invalid option: -Dbuild_config_path
+...
+thread panic: unable to find named lazypath 'tables.zig'
+```
+
+The cause was the hand-written `uucode-ghostty/build.zig` in `build-opentui.sh`. It declared
+only the standard options and exposed a dynamic library plus
+`b.installFile("src/tables.zig", …)`, but ghostty's `src/build/SharedDeps.zig` asks the
+dependency for a different interface:
 
 ```zig
-const lib = b.addLibrary(.{
-    .name = "uucode",
-    .version = "0.1.0",
-    .root_module = b.path("src/root.zig"),  // remote 0332673; HEAD uses .{ .path = ... }
-    .target = target,                        // not a LibraryOptions field
-    .optimize = optimize,                    // not a LibraryOptions field
-    .linkage = .dynamic,
-});
-b.installLazyPath("tables.zig", tables_path); // does not exist in Zig 0.16
+const tables = b.dependency("uucode", .{
+    .build_config_path = b.path("src/build/uucode_config.zig"),
+}).namedLazyPath("tables.zig");
+
+const uucode_mod = b.dependency("uucode", .{
+    .tables_path = tables,
+    .build_config_path = b.path("src/build/uucode_config.zig"),
+}).module("uucode");
 ```
 
-Reproduction with the real compiler (`zig 0.16.0`, no NDK needed; `zig build --help` only
-evaluates the build script):
+So the package must declare `-Dbuild_config_path` and `-Dtables_path` (both
+`std.Build.LazyPath`), export the named lazy path `tables.zig`, and register a module named
+`uucode`. The pinned uucode commit already implements all of that in its own `build.zig`, and
+its tarball ships the UCD inputs the table generator reads. The stub was also doomed because
+it installed `src/tables.zig`, a file the package does not contain.
 
-```
-$ zig build --help
-build.zig:9:10: error: no field named 'target' in struct 'Build.LibraryOptions'
-```
+**Fix applied in this workspace** (`scripts/build-opentui.sh`): install the pinned upstream
+`build.zig` and `build.zig.zon` from commit `9d555245…` instead of generating them, then
+validate the interface before building:
 
-Even after removing `.target`/`.optimize`, `root_module` must be `*std.Build.Module` (not a
-`LazyPath`), `version` must be a `std.SemanticVersion` (not a string), and
-`installLazyPath` does not exist. The API in 0.16 is:
+- `zig build --help` in `uucode-ghostty` must succeed;
+- its output must list `-Dbuild_config_path` and `-Dtables_path`;
+- `build.zig` must still contain `addNamedLazyPath("tables.zig"`.
 
-```zig
-LibraryOptions = struct {
-    linkage: std.builtin.LinkMode = .static,
-    name: []const u8,
-    root_module: *Module,
-    version: ?std.SemanticVersion = null,
-    ...
-};
-pub fn createModule(b: *Build, options: Module.CreateOptions) *Module;
-pub fn installArtifact(b: *Build, artifact: *Step.Compile) void;
-pub fn installFile(b: *Build, src_path: []const u8, dest_rel_path: []const u8) void;
-```
-
-**Fix applied in this workspace** (`scripts/build-opentui.sh`): build the module with
-`b.createModule(.{ .root_source_file = b.path("src/root.zig"), .target, .optimize })`, pass
-it as `.root_module = module`, use a `SemanticVersion`, `b.installArtifact(lib)`, and
-`b.installFile("src/tables.zig", "tables.zig")`. The corrected script evaluates with
-`zig build --help` → exit 0 (tested locally). The script now also validates the generated
-`build.zig` before starting the real build, so a future API mismatch fails in about a second
-with a clear message instead of an opaque step failure.
-
-This is necessary but not proven sufficient: the OpenTUI `build.zig` and the ghostty vendor
-patch may contain further 0.16 API mismatches that only a full build reveals.
+Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
+`b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
+pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
+failure, if any, will be in ghostty's own boundary (`SharedDeps`/`GhosttyZig`) or in
+OpenTUI's `build.zig`.
 
 ### 24.6 Failure taxonomy derived from the history
 
@@ -2321,10 +2318,12 @@ patch may contain further 0.16 API mismatches that only a full build reveals.
 
 ### 24.8 Open items from the audit
 
-- Re-run CI on a commit containing the generator fix; confirm `Build libopentui.so` passes and
-  check whether the next failure is in OpenTUI's own `build.zig`.
+- Re-run CI on the commit that installs the upstream uucode build files; confirm
+  `Build libopentui.so` passes the dependency-graph stage and see whether the next failure is
+  in ghostty's `SharedDeps`/`GhosttyZig` or in OpenTUI's own `build.zig`.
 - Ghostty patch markers are now asserted in `build-opentui.sh`; re-verify them after any
-  OpenTUI or ghostty vendor bump.
-- Decide whether `uucode-ghostty` needs an installed `tables.zig` at all; ghostty's vendored
-  `build.zig.zon` declares the dependency, but the build file fetched from OpenTUI does not
-  reference it directly, so the installed file may be vestigial.
+  OpenTUI or ghostty vendor bump, including the `git init` fix and the regenerated metallib
+  patch context.
+- `uucode-ghostty` no longer has a hand-written `tables.zig`; ghostty's dependency request
+  (`namedLazyPath("tables.zig")` → `module("uucode")`) is served by the package's own
+  generator, and `build-opentui.sh` asserts the option and named-path contract after install.
