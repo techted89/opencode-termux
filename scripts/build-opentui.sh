@@ -146,12 +146,18 @@ pub fn build(b: *std.Build) !void {
 }
 ZIG_EOF
 
-# Create build.zig.zon for uucode-ghostty if it doesn't exist
+# Create build.zig.zon for uucode-ghostty (always recreate to ensure correct content)
+UUCOD_GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig.zon"
+echo ">>> Creating build.zig.zon for uucode-ghostty..."
+cat > "$UUCOD_GHOSTTY_ZON" <<'ZON_EOF'
+.{
+    .name = .uucode,
+    .version = "0.1.0",
+    .fingerprint = 0x8d4ebdea5541ef31,
     .paths = .{"src"},
     .dependencies = .{},
 }
-EOF
-fi
+ZON_EOF
 
 if [ ! -d "$OPENTUI_ZIG_DEPS/ghostty" ]; then
     echo ">>> Downloading ghostty zig dependency..."
