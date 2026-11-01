@@ -19,12 +19,15 @@ File layout (layout "v1", Bun <= 1.3.2 -- the version this repo pins):
       (offset u32, length u32) + 3 u8 flags + 1 padding byte.
     * All StringPointer offsets are relative to the start of the graph.
 
-Layout "v2" (Bun >= 1.3.11): Offsets grows to 32 bytes (compile_exec_argv and
-flags), the module struct becomes a 52-byte stride (6 StringPointers + 4 u8),
-and Bun appends trailing data after the trailer, so total_byte_count is no
-longer stored at EOF. This tool detects that layout and refuses to transplant it
-because the pinned Android runtime reads layout v1. See README for the upgrade
-status.
+Bun 1.3.0-1.3.2 keep the 36-byte module struct but grow Offsets to 32 bytes
+(adding compile_exec_argv and flags). Those fields postdate the pinned 1.2.13
+Android runtime, so transplant() drops them and writes the 24-byte struct the
+runtime reads; the string data and module list are copied unchanged.
+
+Layout "v2" (Bun >= 1.3.11): the module struct becomes a 52-byte stride
+(6 StringPointers + 4 u8) and Bun appends trailing data after the trailer. This
+tool detects that layout and refuses to transplant it because the pinned Android
+runtime reads layout v1. See README for the upgrade status.
 
 Everything here is validated against real standalone binaries produced by
 bun-v1.2.13 and bun-v1.3.14 (see README "Standalone binary format").
@@ -106,7 +109,10 @@ def _parse_at(data, trailer_start, offsets_size, stride):
     # Offsets struct (trailing bytes are a version-specific NUL terminator).
     if modules_offset + modules_length > byte_count:
         return None
-    if byte_count - (modules_offset + modules_length) > MAX_GAP:
+    # The gap holds padding and, for 1.3.x hosts, compile_exec_argv string data.
+    # It is not referenced by the module list, so allow up to the argv limit.
+    gap = byte_count - (modules_offset + modules_length)
+    if gap > MAX_ARGV_LENGTH:
         return None
 
     if modules_length <= 0 or modules_length % stride != 0:
@@ -131,7 +137,12 @@ def _parse_at(data, trailer_start, offsets_size, stride):
 
     total = struct.unpack_from("<Q", data, len(data) - 8)[0]
     trailer_end = trailer_start + len(TRAILER)
-    is_v1 = trailer_end + 8 == len(data) and total == len(data)
+    if offsets_size == 24:
+        is_v1 = stride == 36 and trailer_end + 8 == len(data) and total == len(data)
+    else:
+        # 1.3.0-1.3.2: 32-byte Offsets, still the 36-byte module struct. The
+        # trailing footer/total is not the 24-byte form's, so do not require it.
+        is_v1 = stride == 36
 
     return Graph(
         layout="v1" if is_v1 else "v2",
@@ -257,11 +268,21 @@ def cmd_transplant(args):
     if existing is not None and existing.layout == "v1":
         raise GraphError(f"{args.bun}: runtime binary already contains a module graph")
 
-    # Layout v1 stores the trailer followed by an 8-byte total_byte_count. Slice
-    # up to the end of the trailer; the footer is rewritten for the new file.
-    graph_end = host_graph.trailer_start + len(TRAILER)
-    graph_bytes = bytearray(host[host_graph.graph_start : graph_end])
-    patched = patch_undici(graph_bytes, host_graph.modules_offset)
+    # Copy the string data + module list, then rebuild the Offsets struct in the
+    # 24-byte form the Android runtime understands. 1.3.0-1.3.2 hosts carry a
+    # 32-byte struct with compile_exec_argv and flags; dropping those fields
+    # keeps every offset in the payload valid.
+    payload = bytearray(host[host_graph.graph_start : host_graph.offsets_start])
+    patched = patch_undici(payload, host_graph.modules_offset)
+    offsets = struct.pack(
+        "<QIIII",
+        host_graph.byte_count,
+        host_graph.modules_offset,
+        host_graph.modules_length,
+        host_graph.entry_point_id,
+        0,
+    )
+    graph_bytes = payload + offsets + TRAILER
 
     total = len(bun) + len(graph_bytes) + 8
     output = bytearray(bun)
@@ -277,6 +298,11 @@ def cmd_transplant(args):
     # Re-parse what we just wrote: the graft must round-trip.
     result = parse(read_binary(args.output), args.expect_stride)
     require_v1(result, args.output, args.expect_stride)
+    if result.offsets_size != 24:
+        raise GraphError(
+            f"{args.output}: wrote a {result.offsets_size}-byte Offsets struct; "
+            "the Android runtime reads the 24-byte form"
+        )
     if result.total_byte_count != total or total != os.path.getsize(args.output):
         raise GraphError(f"{args.output}: written binary is not self-consistent")
 
