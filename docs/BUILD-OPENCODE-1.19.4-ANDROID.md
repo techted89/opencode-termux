@@ -23,17 +23,15 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 `README.md` and design notes (context, sometimes stale). See
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
-**Status.** The v1 engine has produced working artifacts (successful CI runs through #57),
-but the current head is **not green**. Runs #41280310141 through #41281508898 confirmed the
-ghostty patch fixes and exposed a series of defects in the vendored OpenTUI dependency setup,
-all fixed here: the hand-written `uucode-ghostty/build.zig` did not implement the interface
-ghostty requests (`-Dbuild_config_path`, `-Dtables_path`, `namedLazyPath("tables.zig")`,
-`module("uucode")`); the workflow pre-created that directory so the extraction was skipped;
-zlib.net answered the runner with an HTML page; the vendored ghostty `build.zig.zon` omitted
-the `wuffs`, `simdutf`, `highway` and `translate-c` path dependencies; and OpenTUI's build
-rejects the undeclared `-Dstrip` option. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker)
-has the run data, diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2)
-lives beside it and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
+**Status.** OpenTUI now builds in CI. Runs #41280310141 through #41281683381 fixed ghostty
+patch application, the vendored uucode package, the zlib URL, ghostty's missing
+`wuffs`/`simdutf`/`highway`/`translate-c` path dependencies and the undeclared `-Dstrip`
+flag. Run #41281683381 passed `Build libopentui.so`, `Verify libopentui.so`, staging and the
+OpenTUI cache save. It then failed in `Clone and patch Bun`: the patch applies, but the
+marker check resolved the relative `$BUN_SRC` after `cd` into the Bun tree; that is fixed
+here. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run data,
+diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside it
+and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
 ---
 
@@ -2311,6 +2309,11 @@ OpenTUI 0.5.10 declares no `strip` option, so run #41281508898 failed before com
 anything with `error: invalid option: -Dstrip`. The flag is gone; ReleaseSafe output is left
 unstripped and stripped later during packaging.
 
+With OpenTUI green, run #41281683381 advanced to `Clone and patch Bun`. The Bun patch applied
+cleanly (33 files), but the marker assertion then failed because it used the relative
+`$BUN_SRC/src/env.zig` *after* `cd "$BUN_SRC"`, so the path resolved inside the Bun tree. The
+script now returns to `$REPO_ROOT` before the assertion.
+
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
 pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
@@ -2327,6 +2330,7 @@ OpenTUI's `build.zig`.
 | Unstable dependency URL | zlib.net served `text/html` to the runner (run #41280877999) | pin the GitHub release asset, byte-identical per `zig fetch` | trusting HTTP 200 for a binary download |
 | Incomplete vendored manifest | OpenTUI's `ghostty-build.zig.zon` omitted `wuffs`, then `simdutf`/`highway` (run #41281095820 and local evaluation) | copy the `pkg/*` shims and declare them as upstream ghostty does | adding only the first missing dependency |
 | Phantom build option | `-Dstrip=true` on OpenTUI 0.5.10 (run #41281508898) | pass only options the build declares; check `zig build -h` | assuming a standard option set |
+| Relative path reused after `cd` | Bun marker check after `cd "$BUN_SRC"` (run #41281683381) | return to `$REPO_ROOT` first, or absolutize the path | trusting relative paths to survive a `cd` |
 | Build-API drift | Zig 0.15 vs 0.16 vs 0.17 `build.zig` | pin Zig, validate generated scripts, consult `lib/std/Build.zig` | changing the Zig version |
 | Hidden patch failure | `git apply … || true` for ghostty | fail on patch mismatch, or assert the expected symbol | continuing with a half-patched tree |
 | Patch applied to the wrong tree | `git apply` inside `build/…/ghostty` skipped everything and exited 0 | `git init` the vendor tree; treat `Skipped patch` as an error | trusting `git apply` exit status alone |
@@ -2367,9 +2371,9 @@ OpenTUI's `build.zig`.
 
 ### 24.8 Open items from the audit
 
-- Re-run CI on the commit that installs the upstream uucode build files; confirm
-  `Build libopentui.so` passes the dependency-graph stage and see whether the next failure is
-  in ghostty's `SharedDeps`/`GhosttyZig` or in OpenTUI's own `build.zig`.
+- OpenTUI is green as of run #41281683381. Continue the pipeline: after the Bun patch-path
+  fix, confirm `Clone and patch WebKit`, the cached ICU/WebKit/Bun stages, and that a warm
+  run reuses the OpenTUI cache.
 - Ghostty patch markers are now asserted in `build-opentui.sh`; re-verify them after any
   OpenTUI or ghostty vendor bump, including the `git init` fix and the regenerated metallib
   patch context.

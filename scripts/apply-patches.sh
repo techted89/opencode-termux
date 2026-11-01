@@ -41,11 +41,13 @@ if [ "$WANT_BUN" -eq 1 ]; then
     git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
     git apply "$REPO_ROOT/patches/bun/android-support.patch"
     echo "    Bun patches applied successfully"
+    # $BUN_SRC is relative; resolve the marker from the repo root, not from the
+    # Bun tree we just cd'd into (run 41281683381).
+    cd "$REPO_ROOT"
     grep -qF "pub const isAndroid" "$BUN_SRC/src/env.zig" || {
         echo "ERROR: Bun patch marker missing in src/env.zig" >&2
         exit 1
     }
-    cd "$REPO_ROOT"
 fi
 
 if [ "$WANT_WEBKIT" -eq 1 ]; then
