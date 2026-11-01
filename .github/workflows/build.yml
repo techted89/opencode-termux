@@ -3,8 +3,6 @@ name: Build OpenCode for Android/Termux
 on:
   # Trigger on tag pushes for releases
   push:
-    branches:
-      - 'fix/opentui-zig16-patch-lint'
     tags:
       - 'v*'
   # Trigger on PRs to main for validation
