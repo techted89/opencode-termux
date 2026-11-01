@@ -169,6 +169,28 @@ fi
 # build files from that same commit keeps them from drifting.
 UUCODE_GHOSTTY_COMMIT="9d55524551411b493cca41ca06363625d90aff1e"
 UUCOD_GHOSTTY_BUILD="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig"
+echo ">>> Creating build.zig for uucode-ghostty..."
+cat > "$UUCOD_GHOSTTY_BUILD" <<'ZIG_EOF'
+const std = @import("std");
+
+pub fn build(b: *std.Build) !void {
+    const lib = b.addLibrary(.{
+        .name = "uucode",
+        .version = std.SemanticVersion.parse("0.1.0") catch null,
+        .root_module = b.path("src/root.zig"),
+        .linkage = .dynamic,
+    });
+
+    // Export tables.zig as a lazy path for ghostty
+    const tables_path = b.path("src/tables.zig");
+    b.installLazyPath("tables.zig", tables_path);
+
+    // Use the library to avoid unused constant error
+    _ = lib;
+}
+ZIG_EOF
+
+# Create build.zig.zon for uucode-ghostty (always recreate to ensure correct content)
 UUCOD_GHOSTTY_ZON="$OPENTUI_ZIG_DEPS/uucode-ghostty/build.zig.zon"
 echo ">>> Installing upstream build files for uucode-ghostty..."
 for build_file in build.zig build.zig.zon; do
