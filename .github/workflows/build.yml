@@ -197,7 +197,7 @@ jobs:
       - name: Compute patch hashes
         id: hashes
         run: |
-          BUN_PATCH_HASH=$(sha256sum patches/bun/android-support.patch | cut -c1-16)
+          BUN_PATCH_HASH=$(cat patches/bun/*.patch | sha256sum | cut -c1-16)
           WEBKIT_PATCH_HASH=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)
           ZIG_PATCH_HASH=$(sha256sum patches/zig/posix-android-sigaction.patch | cut -c1-16)
           OPENTUI_PATCH_HASH=$(sha256sum patches/opentui/v2-0.5.10-android.patch | cut -c1-16)
@@ -232,7 +232,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/cache/zig
-          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-bun-zig-${{ env.BUN_VERSION }}-${{ env.ZIG_VERSION }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('scripts/build-bun.sh', 'scripts/env.sh') }}
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-bun-zig-${{ env.BUN_VERSION }}-${{ env.ZIG_VERSION }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ hashFiles('scripts/build-bun.sh', 'scripts/env.sh') }}
 
       - name: Restore libopentui cache
         id: cache-opentui

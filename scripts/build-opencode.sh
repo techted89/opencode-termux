@@ -304,6 +304,10 @@ done
 
 for candidate in "$PREFIX/libexec/opencode/opencode.bin" "$DIR/../libexec/opencode/opencode.bin" "$DIR/opencode.bin"; do
     if [ -x "$candidate" ]; then
+        # Termux may enter the binary through the dynamic linker, where
+        # /proc/self/exe points at linker64 rather than the file holding the
+        # module graph. Bun reads BUN_SELF_EXE before falling back to it.
+        export BUN_SELF_EXE="$candidate"
         exec "$candidate" "$@"
     fi
 done

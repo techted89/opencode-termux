@@ -1,0 +1,20 @@
+diff --git a/src/StandaloneModuleGraph.zig b/src/StandaloneModuleGraph.zig
+index 267d1f8..7794bdf 100644
+--- a/src/StandaloneModuleGraph.zig
++++ b/src/StandaloneModuleGraph.zig
+@@ -1009,6 +1009,15 @@ pub const StandaloneModuleGraph = struct {
+ 
+         switch (Environment.os) {
+             .linux => {
++                // BUN_SELF_EXE override: Termux may invoke the executable through
++                // the dynamic linker, so /proc/self/exe points at linker64, not at
++                // the file that contains the module graph.
++                if (bun.getenvZ("BUN_SELF_EXE")) |self_exe_override| {
++                    if (std.fs.cwd().openFileZ(self_exe_override, .{})) |file| {
++                        return .fromStdFile(file);
++                    } else |_| {}
++                }
++
+                 if (std.fs.openFileAbsoluteZ("/proc/self/exe", .{})) |easymode| {
+                     return .fromStdFile(easymode);
+                 } else |_| {

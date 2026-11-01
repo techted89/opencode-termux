@@ -40,14 +40,18 @@ if [ "$WANT_BUN" -eq 1 ]; then
     git checkout -- . 2>/dev/null || true  # Reset any previous patches
     git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
     git apply "$REPO_ROOT/patches/bun/android-support.patch"
-    echo "    Bun patches applied successfully"
-    # $BUN_SRC is relative; resolve the marker from the repo root, not from the
-    # Bun tree we just cd'd into (run 41281683381).
-    cd "$REPO_ROOT"
-    grep -qF "pub const isAndroid" "$BUN_SRC/src/env.zig" || {
+    grep -qF "pub const isAndroid" "src/env.zig" || {
         echo "ERROR: Bun patch marker missing in src/env.zig" >&2
         exit 1
     }
+    git apply "$REPO_ROOT/patches/bun/standalone-self-exe.patch"
+    echo "    Bun patches applied successfully"
+    grep -qF "BUN_SELF_EXE" "src/StandaloneModuleGraph.zig" || {
+        echo "ERROR: Bun self-exe patch marker missing in src/StandaloneModuleGraph.zig" >&2
+        exit 1
+    }
+    # $BUN_SRC is relative; continue from the repo root for the summary paths.
+    cd "$REPO_ROOT"
 fi
 
 if [ "$WANT_WEBKIT" -eq 1 ]; then
