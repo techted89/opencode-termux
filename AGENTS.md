@@ -44,7 +44,7 @@ This repository cross-compiles OpenCode for Android/Termux (aarch64) using GitHu
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Bun | 1.2.13 | Host + target; must match for module graph compatibility |
+| Bun | 1.3.2 host / 1.2.13 target | Host needs `Bun.build({compile})`; 1.3.2's 32-byte Offsets are down-converted to the 24-byte form 1.2.13 reads |
 | Zig | 0.16.0 | Builds `libopentui.so` |
 | Android NDK | r28b | API 24, aarch64-linux-android |
 | WebKit/JSC | 017930ebf9 | Bundled in Bun |

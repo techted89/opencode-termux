@@ -153,7 +153,11 @@ jobs:
 
       - name: Install Bun (host, pinned for module graph compatibility)
         run: |
-          HOST_BUN_VERSION="1.2.13"
+          # Bun.build({ compile }) is silently ignored by 1.2.13 (no binary is
+          # written). 1.3.2 implements it and still emits the 36-byte module
+          # graph; transplant-bun-graph.py down-converts its 32-byte Offsets to
+          # the 24-byte form the 1.2.13 Android runtime reads.
+          HOST_BUN_VERSION="1.3.2"
           GOT="$(bun --version 2>/dev/null || true)"
           if [ "$GOT" != "$HOST_BUN_VERSION" ]; then
             echo "Installing Bun v${HOST_BUN_VERSION} (current: ${GOT:-none})..."

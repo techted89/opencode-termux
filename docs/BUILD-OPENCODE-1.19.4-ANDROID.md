@@ -2340,6 +2340,13 @@ script now writes minimal stubs for the seven non-host platform packages; the ar
 exports `process.env.OPENTUI_LIB_PATH`, which the launcher points at the packaged
 `libopentui.so`.
 
+Run #41320411660 then bundled successfully but produced no host binary: Bun 1.2.13's
+`Bun.build` silently ignores `compile` and returns success without writing the outfile. Bun
+1.3.0 implements it, but grows the Offsets struct to 32 bytes (adding `compile_exec_argv`
+and flags) while keeping the 36-byte module struct. `transplant-bun-graph.py` now accepts
+that host layout and rewrites the Offsets struct to the 24-byte form the pinned 1.2.13
+Android runtime reads, so the host bundler moves to 1.3.2 and the target stays 1.2.13.
+
 The JS side pins `@opentui/core` 0.4.5 while this pipeline builds OpenTUI 0.5.10. Comparing
 the prebuilt arm64 libraries, every C symbol exported by 0.4.5 is present in 0.5.10; the 15
 that are missing are C++ runtime internals (`_ZNSt3__1…`, `_ZNSt12…`). The native library is
