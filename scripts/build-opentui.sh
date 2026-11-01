@@ -135,7 +135,7 @@ pub fn build(b: *std.Build) !void {
     const lib = b.addLibrary(.{
         .name = "uucode",
         .version = "0.1.0",
-        .root_source_file = .{ .path = "src/root.zig" },
+        .root_module = .{ .path = "src/root.zig" },
         .target = target,
         .optimize = optimize,
         .linkage = .dynamic,
