@@ -131,7 +131,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) !void {
     const lib = b.addLibrary(.{
         .name = "uucode",
-        .version = "0.1.0",
+        .version = std.SemanticVersion.parse("0.1.0") orelse unreachable,
         .root_module = b.path("src/root.zig"),
         .linkage = .dynamic,
     });
