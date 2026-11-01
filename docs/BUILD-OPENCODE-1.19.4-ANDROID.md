@@ -24,15 +24,15 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
 **Status.** The v1 engine has produced working artifacts (successful CI runs through #57),
-but the current head is **not green**. Runs #41280310141 and #41280659177 confirmed the
-ghostty patch fixes and exposed two defects in the vendored uucode setup, both fixed here:
-both vendor patches applied, asserted their markers and re-applied idempotently. It then
-failed one stage later, in OpenTUI's dependency graph, because the hand-written
-`uucode-ghostty/build.zig` did not implement the interface ghostty requests
-(`-Dbuild_config_path`, `-Dtables_path`, `namedLazyPath("tables.zig")`, `module("uucode")`).
-That stub is replaced by the pinned upstream build files. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker)
-has the run data, diagnosis and remaining open items. The v2 pipeline (`opencode2`,
-Bun 1.4.2) lives beside it and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
+but the current head is **not green**. Runs #41280310141, #41280659177 and #41280877999
+confirmed the ghostty patch fixes and exposed three defects in the vendored OpenTUI
+dependencies, all fixed here: the hand-written `uucode-ghostty/build.zig` did not implement the
+interface ghostty requests (`-Dbuild_config_path`, `-Dtables_path`,
+`namedLazyPath("tables.zig")`, `module("uucode")`); the workflow pre-created that directory so
+the extraction was skipped; and zlib.net answered the runner with an HTML page instead of the
+tarball. [§24](#24-ci-history-failure-taxonomy-and-the-current-opentui-blocker) has the run
+data, diagnosis and remaining open items. The v2 pipeline (`opencode2`, Bun 1.4.2) lives beside
+it and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 
 ---
 
@@ -1506,9 +1506,13 @@ specific vendored trees. `build-opentui.sh` reconstructs them:
 | `uucode-ghostty` | `jacobsandlund/uucode` @ `9d555245…` | ghostty's copy; its **upstream** `build.zig`/`build.zig.zon` are installed, because ghostty's `SharedDeps.init` needs their options (`-Dbuild_config_path`, `-Dtables_path`) and named lazy path `tables.zig` |
 | `ghostty` | `ghostty-org/ghostty` @ `aeda37b3…` | only `include/`, `src/`, `pkg/android-ndk`, `pkg/apple-sdk`, `LICENSE` are kept; `src/font/res` is dropped; its `build.zig`/`.zon` are fetched from OpenTUI's vendor directory and patched |
 
-The build also patches `ghostty/build.zig.zon` to add a `zlib` dependency when it is missing
-(a hash-pinned tarball), and applies `ghostty-android-metallib.patch` so the non-Apple build
-does not create a Metal shader library.
+The build also patches `ghostty/build.zig.zon` to add a `zlib` dependency when it is missing,
+and applies `ghostty-android-metallib.patch` so the non-Apple build does not create a Metal
+shader library. The dependency is pinned to the GitHub release asset
+`github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz` with hash
+`N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8`, verified with `zig fetch`. Those are the
+same bytes as the zlib.net fossil tarball, which served the runner an HTML page in run
+#41280877999.
 
 The Bionic sysroot shim exists because `translate-c` needs real headers for `miniaudio` and
 `yoga`, but those headers use Apple nullability annotations and relative includes that do not
@@ -1591,7 +1595,7 @@ the OpenCode dependency cache, but not WebKit unless the commit changed.
 | RAM | ≥16 GB recommended; 8 GB is not enough | WebKit link is the peak; `JOBS=4` on 16 GB |
 | Disk | ≥60 GB cold | WebKit build tree dominates; sources are ~3.8 GB together |
 | Time | 2–3 h cold, ~4 min warm | 360-minute job timeout covers a cold run with retries |
-| Network | GitHub, unicode.org, ziglang.org, models.dev, zlib.net, npm registry | Models fetch has 3×15 s timeouts and a local-file override |
+| Network | GitHub (incl. release assets), unicode.org, ziglang.org, models.dev, npm registry | Models fetch has 3×15 s timeouts and a local-file override; avoid zlib.net, which has answered runners with HTML |
 
 ### 20.12 Failure surfaces by layer
 
@@ -2279,6 +2283,13 @@ The guard now tests for a file from the package (`src/ucd_inputs.zig`) instead o
 directory, and the workflow no longer pre-creates the tree, so an empty or partial checkout
 is re-extracted instead of accepted.
 
+A third defect followed in run #41280877999: Zig refused `ghostty/build.zig.zon` with
+`unrecognized 'Content-Type' header: 'text/html'` for the zlib tarball, because zlib.net
+answered the runner (not this development host) with an HTML page. The dependency now points
+at the GitHub release asset for v1.3.1; `zig fetch` reports the same hash
+(`N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8`) as the fossil tarball, so the pinned
+bytes are unchanged.
+
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
 pinned uucode tree. This is still not proof that the full OpenTUI build succeeds: the next
@@ -2292,6 +2303,7 @@ OpenTUI's `build.zig`.
 | Environment/path assumption | relative `WORK_DIR`, `cd /tmp` breaking `ZIG_DIR` | one `abspath()` helper, absolute paths everywhere | re-running with different CWD |
 | Package-manager protocol mismatch | `catalog:` on Bun 1.2.13 | rewrite manifests before install | upgrading host Bun to 1.4.4 |
 | Hand-encoded dependency hash | ghostty `zlib` (12 attempts) | `zig fetch <url>` and paste its output | guessing hex/base32/base64 variants |
+| Unstable dependency URL | zlib.net served `text/html` to the runner (run #41280877999) | pin the GitHub release asset, byte-identical per `zig fetch` | trusting HTTP 200 for a binary download |
 | Build-API drift | Zig 0.15 vs 0.16 vs 0.17 `build.zig` | pin Zig, validate generated scripts, consult `lib/std/Build.zig` | changing the Zig version |
 | Hidden patch failure | `git apply … || true` for ghostty | fail on patch mismatch, or assert the expected symbol | continuing with a half-patched tree |
 | Patch applied to the wrong tree | `git apply` inside `build/…/ghostty` skipped everything and exited 0 | `git init` the vendor tree; treat `Skipped patch` as an error | trusting `git apply` exit status alone |

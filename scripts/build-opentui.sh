@@ -241,9 +241,12 @@ import sys
 zon_path = sys.argv[1]
 with open(zon_path, "r") as f:
     content = f.read()
+# zlib.net answered the GitHub runner with an HTML page (run 41280877999).
+# The GitHub release asset is the same verified tarball: `zig fetch` reports
+# the identical hash for both.
 zlib_dep = """
     .zlib = .{
-        .url = "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+        .url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",
         .hash = "N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8",
     },
 """

@@ -243,7 +243,7 @@ jobs:
           GHOSTTY_ZON="${OPENTUI_SRC}/packages/native/zig-deps/ghostty/build.zig.zon"
           if [ -f "$GHOSTTY_ZON" ] && ! grep -q "zlib" "$GHOSTTY_ZON"; then
             echo "[!] Missing zlib dependency in ghostty build.zig.zon - applying fix"
-            python3 -c 'import sys; zon_path=sys.argv[1]; content=open(zon_path).read(); zlib_block="""\n    .zlib = .{\n        .url = \"https://github.com/madler/zlib/tarball/v1.3.1\",\n        .hash = \"12209d76f09e5772392437637841f48680199e843bcbc50bcf5123d463d1a19615a1\",\n    },\n"""; content=content.replace(".dependencies = .{", ".dependencies = .{" + zlib_block) if ".dependencies = .{" in content else content; open(zon_path,"w").write(content)' "$GHOSTTY_ZON"
+            python3 -c 'import sys; zon_path=sys.argv[1]; content=open(zon_path).read(); zlib_block="""\n    .zlib = .{\n        .url = \"https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz\",\n        .hash = \"N-V-__8AAJj_QgDBhU17TCtcvdjOZZPDfkvxrEAyZkc14VN8\",\n    },\n"""; content=content.replace(".dependencies = .{", ".dependencies = .{" + zlib_block) if ".dependencies = .{" in content else content; open(zon_path,"w").write(content)' "$GHOSTTY_ZON"
             echo "[✓] Applied zlib dependency fix"
           fi
           
