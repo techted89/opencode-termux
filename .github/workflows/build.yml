@@ -247,8 +247,10 @@ jobs:
             echo "[✓] Applied zlib dependency fix"
           fi
           
-          # Ensure uucode-ghostty directory exists
-          mkdir -p "${OPENTUI_SRC}/packages/native/zig-deps/uucode-ghostty"
+          # uucode-ghostty is populated by build-opentui.sh. Do not pre-create
+          # the directory here: the completeness check in that script keys on a
+          # file from the package, and an empty directory made it skip the
+          # extraction (run 41280659177).
 
       # ======================================================================
       # Build libopentui.so first. It needs only Zig + NDK + OpenTUI, so a

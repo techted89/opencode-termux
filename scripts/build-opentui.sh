@@ -147,8 +147,11 @@ if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-opentui" ]; then
     rm -f "$WORK_DIR_ABS/uucode-opentui.tar.gz"
 fi
 
-# ghostty build.zig.zon depends on uucode-ghostty
-if [ ! -d "$OPENTUI_ZIG_DEPS/uucode-ghostty" ]; then
+# ghostty build.zig.zon depends on uucode-ghostty. Test for a file inside the
+# package, not for the directory: the workflow used to `mkdir -p` this path as
+# a legacy workaround for the old stub, so a `-d` guard skipped the extraction
+# and left Zig with only the two build files (run 41280659177).
+if [ ! -f "$OPENTUI_ZIG_DEPS/uucode-ghostty/src/ucd_inputs.zig" ]; then
     echo ">>> Downloading uucode-ghostty zig dependency..."
     curl -fsSL "https://github.com/jacobsandlund/uucode/archive/9d55524551411b493cca41ca06363625d90aff1e.tar.gz" -o "$WORK_DIR_ABS/uucode-ghostty.tar.gz"
     mkdir -p "$OPENTUI_ZIG_DEPS/uucode-ghostty"

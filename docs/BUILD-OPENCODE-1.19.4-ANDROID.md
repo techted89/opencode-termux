@@ -24,7 +24,8 @@ see [Upgrade status](#14-upgrade-status-bun-1314).
 [§19.6](#196-readme-and-design-note-drift) for known drift.
 
 **Status.** The v1 engine has produced working artifacts (successful CI runs through #57),
-but the current head is **not green**. Run #41280310141 confirmed the ghostty patch fixes:
+but the current head is **not green**. Runs #41280310141 and #41280659177 confirmed the
+ghostty patch fixes and exposed two defects in the vendored uucode setup, both fixed here:
 both vendor patches applied, asserted their markers and re-applied idempotently. It then
 failed one stage later, in OpenTUI's dependency graph, because the hand-written
 `uucode-ghostty/build.zig` did not implement the interface ghostty requests
@@ -2264,6 +2265,19 @@ validate the interface before building:
 - `zig build --help` in `uucode-ghostty` must succeed;
 - its output must list `-Dbuild_config_path` and `-Dtables_path`;
 - `build.zig` must still contain `addNamedLazyPath("tables.zig"`.
+
+Run #41280659177 caught a second problem in the same area: the workflow's patch-integrity
+step ran `mkdir -p …/uucode-ghostty`, a legacy workaround for the stub. The script's
+`[ ! -d ]` guard therefore skipped the tarball extraction, and Zig found only the two build
+files just downloaded:
+
+```text
+src/ucd_inputs.zig:1:1: error: unable to load 'ucd_inputs.zig': FileNotFound
+```
+
+The guard now tests for a file from the package (`src/ucd_inputs.zig`) instead of the
+directory, and the workflow no longer pre-creates the tree, so an empty or partial checkout
+is re-extracted instead of accepted.
 
 Verified locally with Zig 0.16.0: a scratch package whose `build.zig` makes exactly the two
 `b.dependency` calls above plus `.module("uucode")` evaluates and builds (exit 0) against the
