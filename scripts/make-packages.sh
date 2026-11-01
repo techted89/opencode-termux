@@ -8,10 +8,11 @@
 #   libexec/opencode/opencode.bin   ELF (Bun runtime + module graph)
 #   lib/*.so*                       native libraries
 #
-# Creates three package formats:
+# Creates four package formats:
 # 1. ZIP: opencode-${VERSION}-android-aarch64.zip (unpack over $PREFIX)
-# 2. Pacman: opencode-${VERSION}-1-aarch64.pkg.tar.xz (Termux pacman format)
-# 3. Deb: opencode_${VERSION}_aarch64.deb (old Termux deb format)
+# 2. tar.xz: opencode-${VERSION}-android-aarch64.tar.xz (same layout, root-free)
+# 3. Pacman: opencode-${VERSION}-1-aarch64.pkg.tar.xz (Termux pacman format)
+# 4. Deb: opencode_${VERSION}_aarch64.deb (old Termux deb format)
 
 set -euo pipefail
 
@@ -72,7 +73,15 @@ ZIP_NAME="opencode-${OPENCODE_VERSION}-android-aarch64.zip"
 echo "    Created $ZIP_NAME"
 
 # ==========================================
-# 2. Pacman package (Termux)
+# 2. Plain tar.xz (root-free $PREFIX layout)
+# ==========================================
+echo ">>> Creating tar.xz archive..."
+TAR_NAME="opencode-${OPENCODE_VERSION}-android-aarch64.tar.xz"
+(cd "$ZIP_ROOT" && tar cf - bin libexec lib | xz -9 > "$PKG_DIR_ABS/$TAR_NAME")
+echo "    Created $TAR_NAME"
+
+# ==========================================
+# 3. Pacman package (Termux)
 # ==========================================
 echo ">>> Creating pacman package..."
 PACMAN_ROOT="$PKG_DIR_ABS/pacman-root"
@@ -99,7 +108,7 @@ PACMAN_NAME="opencode-${OPENCODE_VERSION}-1-aarch64.pkg.tar.xz"
 echo "    Created $PACMAN_NAME"
 
 # ==========================================
-# 3. Deb package (old Termux format)
+# 4. Deb package (old Termux format)
 # ==========================================
 echo ">>> Creating deb package..."
 DEB_ROOT="$PKG_DIR_ABS/deb-root"
@@ -139,14 +148,15 @@ rm -rf "$ZIP_ROOT" "$PACMAN_ROOT" "$DEB_ROOT"
 # Ship the root-free installer next to the packages and checksum it too, so
 # users can verify every release asset with one `sha256sum -c SHA256SUMS`.
 install -m 755 "$REPO_ROOT_ABS/scripts/install-termux.sh" "$PKG_DIR_ABS/install-termux.sh"
-(cd "$PKG_DIR_ABS" && sha256sum "$ZIP_NAME" "$PACMAN_NAME" "$DEB_NAME" install-termux.sh > SHA256SUMS)
+(cd "$PKG_DIR_ABS" && sha256sum "$ZIP_NAME" "$TAR_NAME" "$PACMAN_NAME" "$DEB_NAME" install-termux.sh > SHA256SUMS)
 
 echo ""
 echo "=== Packages created ==="
 echo ""
-ls -lh "$PKG_DIR_ABS/$ZIP_NAME" "$PKG_DIR_ABS/$PACMAN_NAME" "$PKG_DIR_ABS/$DEB_NAME" "$PKG_DIR_ABS/SHA256SUMS" "$PKG_DIR_ABS/install-termux.sh"
+ls -lh "$PKG_DIR_ABS/$ZIP_NAME" "$PKG_DIR_ABS/$TAR_NAME" "$PKG_DIR_ABS/$PACMAN_NAME" "$PKG_DIR_ABS/$DEB_NAME" "$PKG_DIR_ABS/SHA256SUMS" "$PKG_DIR_ABS/install-termux.sh"
 echo ""
 echo "Install on Termux:"
 echo "  pacman -U $PACMAN_NAME"
 echo "  dpkg -i $DEB_NAME"
 echo "  unzip -o $ZIP_NAME -d \"\$PREFIX\"   # zip mirrors the \$PREFIX layout"
+echo "  tar -xJf $TAR_NAME -C \"\$PREFIX\"   # tar.xz has the same layout"

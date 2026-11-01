@@ -41,7 +41,7 @@ the deb and standalone-zip alternatives.
 
 ### Installer script (recommended)
 
-[`scripts/install-termux.sh`](scripts/install-termux.sh) installs any of the three
+[`scripts/install-termux.sh`](scripts/install-termux.sh) installs any of the four
 release artifacts into `$PREFIX`. It needs no root, verifies `SHA256SUMS` when the
 file sits next to the artifact, checks the aarch64 ELF headers, and keeps the
 previous launcher as `$PREFIX/bin/opencode.pre-install`.
@@ -51,7 +51,7 @@ previous launcher as `$PREFIX/bin/opencode.pre-install`.
 chmod +x scripts/install-termux.sh
 ./scripts/install-termux.sh opencode-1.19.4-android-aarch64.zip
 
-# a .deb or .pkg.tar.xz works the same way
+# a .deb, .pkg.tar.xz, or .tar.xz works the same way
 ./scripts/install-termux.sh opencode_1.19.4_aarch64.deb
 
 # pass an https URL instead of a path to download and install in one step
@@ -63,9 +63,9 @@ The manual package-manager routes are below.
 
 ### Option 1: Standalone binary (easiest)
 
-> **Note:** The zip mirrors the Termux `$PREFIX` layout: `bin/opencode` (launcher),
-> `libexec/opencode/opencode.bin` (the ELF), and `lib/*.so` (native libraries).
-> Unpack it over `$PREFIX` so the launcher can find the binary and the libraries.
+> **Note:** The zip and tar.xz mirror the Termux `$PREFIX` layout: `bin/opencode`
+> (launcher), `libexec/opencode/opencode.bin` (the ELF), and `lib/*.so` (native
+> libraries). Unpack one over `$PREFIX` so the launcher can find them.
 
 ```bash
 # Download the latest "opencode-*-android-aarch64.zip" from
@@ -73,6 +73,7 @@ The manual package-manager routes are below.
 # Then install:
 
 unzip -o opencode-*-android-aarch64.zip -d "$PREFIX"
+# or: tar -xJf opencode-*-android-aarch64.tar.xz -C "$PREFIX"
 chmod +x "$PREFIX/bin/opencode" "$PREFIX/libexec/opencode/opencode.bin"
 
 # Install required dependency
@@ -138,7 +139,7 @@ opencode-termux/
     build-opentui.sh               # Build libopentui.so for Android
     build-opencode.sh              # Build OpenCode and stage the $PREFIX layout
     transplant-bun-graph.py        # Inspect/transplant/verify the Bun module graph
-    make-packages.sh               # Create zip, pacman, and deb packages
+    make-packages.sh               # Create zip, tar.xz, pacman, and deb packages
     build-opencode-android.ts      # TypeScript helper (host bundle + standalone compile)
     lint-patch-application.py      # Reject silent failures; verify patch coverage and markers
     env-v2.sh                      # (v2) Environment for the v2 pipeline

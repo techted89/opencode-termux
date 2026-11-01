@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # install-termux.sh - install an OpenCode Android/aarch64 release package.
 #
-# Accepts any of the three release artifacts (or an https URL to one):
+# Accepts any of the four release artifacts (or an https URL to one):
 #   opencode-<version>-android-aarch64.zip
+#   opencode-<version>-android-aarch64.tar.xz
 #   opencode_<version>_aarch64.deb
 #   opencode-<version>-1-aarch64.pkg.tar.xz
 #
@@ -32,9 +33,10 @@ Options:
   -h, --help            show this help
 
 With no artifact, the current directory is searched for
-opencode-*-android-aarch64.zip, opencode_*_aarch64.deb or
-opencode-*-aarch64.pkg.tar.xz, in that order. An https URL is downloaded with
-curl. If a SHA256SUMS file sits next to the artifact it is verified.
+opencode-*-android-aarch64.zip, opencode-*-android-aarch64.tar.xz,
+opencode_*_aarch64.deb or opencode-*-aarch64.pkg.tar.xz, in that order. An
+https URL is downloaded with curl. If a SHA256SUMS file sits next to the
+artifact it is verified.
 EOF
 }
 
@@ -79,7 +81,7 @@ esac
 [ -d "$prefix" ] || die "prefix does not exist: $prefix"
 
 if [ -z "$artifact" ]; then
-    for pattern in 'opencode-*-android-aarch64.zip' 'opencode_*_aarch64.deb' 'opencode-*-aarch64.pkg.tar.xz'; do
+    for pattern in 'opencode-*-android-aarch64.zip' 'opencode-*-android-aarch64.tar.xz' 'opencode_*_aarch64.deb' 'opencode-*-aarch64.pkg.tar.xz'; do
         for candidate in $pattern; do
             if [ -f "$candidate" ]; then
                 artifact="$candidate"
@@ -152,7 +154,7 @@ case "$base" in
         tar -xJf "$artifact" -C "$work/pkg"
         ;;
     *)
-        die "unsupported artifact type: $base (expected .zip, .deb or .pkg.tar.xz)"
+        die "unsupported artifact type: $base (expected .zip, .tar.xz, .deb or .pkg.tar.xz)"
         ;;
 esac
 

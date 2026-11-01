@@ -519,6 +519,7 @@ jobs:
           name: opencode-termux-${{ env.OPENCODE_VERSION }}-${{ runner.os }}-${{ github.run_id }}
           path: |
             ${{ env.WORK_DIR }}/packages/*.zip
+            ${{ env.WORK_DIR }}/packages/opencode-*-android-aarch64.tar.xz
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
             ${{ env.WORK_DIR }}/packages/SHA256SUMS
@@ -549,6 +550,7 @@ jobs:
         with:
           files: |
             ${{ env.WORK_DIR }}/packages/*.zip
+            ${{ env.WORK_DIR }}/packages/opencode-*-android-aarch64.tar.xz
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
             ${{ env.WORK_DIR }}/packages/SHA256SUMS
@@ -631,6 +633,14 @@ jobs:
             unzip -l artifacts/*.zip | head -20
           else
             echo "ERROR: No ZIP package found"
+            exit 1
+          fi
+
+          if ls artifacts/*android-aarch64.tar.xz 1> /dev/null 2>&1; then
+            echo "✓ tar.xz archive found"
+            tar -tf artifacts/*android-aarch64.tar.xz | head -20
+          else
+            echo "ERROR: No tar.xz archive found"
             exit 1
           fi
           
