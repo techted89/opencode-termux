@@ -304,17 +304,17 @@ runtime must use compatible Bun releases.
 
 | Bun | `Offsets` | Module stride | Layout |
 |---|---|---|---|
-| 1.2.x (target: 1.2.13) | 24 bytes | 36 bytes (4 StringPointers + 3 u8 + 1 padding) | graph ends at `EOF-8`, `total_byte_count == file size` |
-| 1.3.0-1.3.2 (host: 1.3.2) | 32 bytes (`compile_exec_argv`, `flags`) | 36 bytes (same module list) | host graph ends at `EOF-8`; the transplant strips the extra fields for the 1.2.13 runtime |
+| 1.2.x + `android-support.patch` (target: 1.2.13) | 32 bytes (`compile_exec_argv`, `flags`) | 36 bytes (4 StringPointers + 3 u8 + 1 padding) | graph ends at `EOF-8`, `total_byte_count == file size` |
+| 1.3.0-1.3.2 (host: 1.3.2) | 32 bytes (`compile_exec_argv`, `flags`) | 36 bytes (same module list) | host graph ends at `EOF-8`; the transplant preserves the 32-byte form |
+| unpatched 1.2.x | 24 bytes | 36 bytes (same module list) | accepted by upstream 1.2.13; this repo widens it to 32 |
 | >= 1.3.11 | 32 bytes | 52 bytes (6 StringPointers + 4 u8) | trailing data after the trailer, no size footer at EOF |
 
-This pipeline pins **host Bun 1.3.2** and **target Bun 1.2.13**. Both use the
-36-byte module stride; 1.3.2 writes the 32-byte `Offsets` variant, and
-`scripts/transplant-bun-graph.py` strips `compile_exec_argv`/`flags` to the
-24-byte struct the Android runtime reads. This is a **source-mode** graft: upstream
-says the graph is not portable between arbitrary Bun binaries (oven-sh/bun#43638),
-and a bytecode graph would embed host builtins, so the build must not use
-`--bytecode`.
+This pipeline pins **host Bun 1.3.2** and **target Bun 1.2.13 + `android-support.patch`**.
+Both use the 32-byte `Offsets` and the 36-byte module stride, so the transplant
+preserves `compile_exec_argv` and `flags`. This is a **source-mode** graft:
+upstream says the graph is not portable between arbitrary Bun binaries
+(oven-sh/bun#43638), and a bytecode graph would embed host builtins, so the build
+must not use `--bytecode`.
 
 `scripts/transplant-bun-graph.py` locates the trailer from the end of the file,
 auto-detects the `Offsets` size and the module stride, validates every StringPointer
@@ -322,9 +322,13 @@ against the string-data region, and refuses to graft a graph whose stride does n
 match the target. CI runs its `verify` subcommand on the finished binary, so a
 host/target mismatch fails the build instead of shipping a binary that dies at startup.
 
-The previous helper hardcoded a 32-byte `Offsets` struct (the 1.3.x layout).
-Against the 1.2.13 target runtime it read past the struct and derived a
-negative graph size, so the transplant step could not succeed.
+The earlier helper wrote a 24-byte `Offsets` struct after `android-support.patch`
+had already extended the target to 32 bytes. The runtime then read the module
+list as the offsets, rejected the graph, and silently fell back to Bun's CLI
+(`1.2.13`). The actual OpenCode graph was extracted and run on real Bun 1.2.13
+on x86_64, where it printed `1.19.4`; that isolated the failure to the Android
+`Offsets` layout rather than the graph or the launcher. The transplant now keeps
+the 32-byte struct, and `verify` rejects a 24-byte output.
 
 OpenCode's monorepo uses the `catalog:` workspace protocol. `build-opencode.sh`
 rewrites those references from the root catalog before `bun install`, so the host
@@ -455,7 +459,7 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 | Component | Version/Commit | Why pinned |
 |-----------|---------------|------------|
 | Bun (target) | v1.2.13 (tag `bun-v1.2.13`) | Verified Android build; see upgrade status |
-| Bun (host) | v1.2.13 | Module graph compat (36-byte stride, layout v1) |
+| Bun (host) | v1.3.2 | `Bun.build({compile})` support; 32-byte Offsets, 36-byte stride |
 | WebKit/JSC | `017930eb` (oven-sh/WebKit) | Matches Bun v1.2.13's expected WebKit |
 | ICU | 75.1 | Matches Bun v1.2.13's expected ICU |
 | Android NDK | r28b (28.1.13356709) | Clang 19, stable |

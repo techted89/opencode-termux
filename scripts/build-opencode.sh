@@ -266,10 +266,11 @@ rm -f "$BUILD_SCRIPT_LOCAL"
 #   libexec/opencode/opencode.bin    actual ELF (Bun runtime + module graph)
 #   lib/*.so*                        libopentui.so, libc++_shared.so, libtagfix.so
 # ---------------------------------------------------------------------------
-# Host Bun 1.3.2 emits 32-byte Offsets + 36-byte modules; the 1.2.13 target
-# reads 24-byte Offsets + 36-byte modules. transplant-bun-graph.py strips the
-# 1.3.x fields. The graph is source-only (no --bytecode); upstream does not
-# promise portability between arbitrary Bun binaries (oven-sh/bun#43638).
+# Host Bun 1.3.2 emits 32-byte Offsets + 36-byte modules. The Android
+# 1.2.13 runtime is patched by android-support.patch to the same 32-byte
+# Offsets, so transplant-bun-graph.py preserves them. The graph is source-only
+# (no --bytecode); upstream does not promise portability between arbitrary Bun
+# binaries (oven-sh/bun#43638).
 echo ">>> Transplanting module graph onto the Android Bun runtime..."
 BIN_DIR="$DIST_DIR_ABS/bin"
 LIBEXEC_DIR="$DIST_DIR_ABS/libexec/opencode"

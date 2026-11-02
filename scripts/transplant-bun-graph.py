@@ -6,23 +6,26 @@ host Bun and grafts the resulting serialised module graph onto the Android Bun
 runtime. This module owns that binary format; build-opencode.sh calls it rather
 than re-deriving offsets in the bundler script.
 
-File layout (layout "v1", Bun <= 1.3.2 -- the version this repo pins):
+File layout (layout "v1", host Bun 1.3.2 and this repo's Android runtime):
 
     [bun runtime][string data][module list][Offsets][trailer][total: u64 LE]
                                             |<------ module graph ------>|
 
-    * Offsets is 24 bytes: byte_count u64, modules_ptr (u32 offset, u32 length),
-      entry_point_id u32, plus 4 bytes of padding.
+    * Offsets is 32 bytes: byte_count u64, modules_ptr (u32 offset, u32 length),
+      entry_point_id u32, compile_exec_argv (u32 offset, u32 length), flags u32.
+    * Unpatched Bun 1.2.x uses a 24-byte Offsets (no compile_exec_argv/flags).
+      The Android runtime in this repo is Bun 1.2.13 plus
+      patches/bun/android-support.patch, which installs the 32-byte form; host
+      Bun 1.3.2 also emits 32 bytes. transplant() preserves the host layout, or
+      widens a 24-byte host with an empty argv and zero flags.
     * The trailer is "\\n---- Bun! ----\\n" and sits at EOF - 8 - len(trailer).
     * total_byte_count == file size.
     * Each CompiledModuleGraphFile is a 36-byte stride: 4 StringPointers
       (offset u32, length u32) + 3 u8 flags + 1 padding byte.
     * All StringPointer offsets are relative to the start of the graph.
 
-Bun 1.3.0-1.3.2 keep the 36-byte module struct but grow Offsets to 32 bytes
-(adding compile_exec_argv and flags). Those fields postdate the pinned 1.2.13
-Android runtime, so transplant() drops them and writes the 24-byte struct the
-runtime reads; the string data and module list are copied unchanged.
+The runtime's Offsets struct must match exactly; a 24-byte graph installed on
+this Android runtime is read as garbage and silently falls back to Bun's CLI.
 
 Layout "v2" (Bun >= 1.3.11): the module struct becomes a 52-byte stride
 (6 StringPointers + 4 u8) and Bun appends trailing data after the trailer. This
@@ -268,20 +271,33 @@ def cmd_transplant(args):
     if existing is not None and existing.layout == "v1":
         raise GraphError(f"{args.bun}: runtime binary already contains a module graph")
 
-    # Copy the string data + module list, then rebuild the Offsets struct in the
-    # 24-byte form the Android runtime understands. 1.3.0-1.3.2 hosts carry a
-    # 32-byte struct with compile_exec_argv and flags; dropping those fields
-    # keeps every offset in the payload valid.
+    # Copy the string data + module list, then write the 32-byte Offsets struct
+    # the Android runtime expects. The android-support.patch extends 1.2.13's
+    # Offsets with compile_exec_argv and flags, matching host Bun 1.3.2. Dropping
+    # those fields (the previous 24-byte form) makes the runtime read the module
+    # list as offsets and fall back to Bun's CLI.
     payload = bytearray(host[host_graph.graph_start : host_graph.offsets_start])
     patched = patch_undici(payload, host_graph.modules_offset)
-    offsets = struct.pack(
-        "<QIIII",
-        host_graph.byte_count,
-        host_graph.modules_offset,
-        host_graph.modules_length,
-        host_graph.entry_point_id,
-        0,
-    )
+    if host_graph.offsets_size == 32:
+        offsets = host[host_graph.offsets_start : host_graph.offsets_start + 32]
+    elif host_graph.offsets_size == 24:
+        offsets = struct.pack(
+            "<QIIIIII",
+            host_graph.byte_count,
+            host_graph.modules_offset,
+            host_graph.modules_length,
+            host_graph.entry_point_id,
+            host_graph.byte_count,
+            0,
+            0,
+        )
+    else:
+        raise GraphError(
+            f"{args.host}: unsupported Offsets size {host_graph.offsets_size}; "
+            "expected 32 (Android runtime) or 24 (unpatched 1.2.x)"
+        )
+    if len(offsets) != 32:
+        raise GraphError(f"{args.host}: could not construct 32-byte Offsets")
     graph_bytes = payload + offsets + TRAILER
 
     total = len(bun) + len(graph_bytes) + 8
@@ -298,10 +314,10 @@ def cmd_transplant(args):
     # Re-parse what we just wrote: the graft must round-trip.
     result = parse(read_binary(args.output), args.expect_stride)
     require_v1(result, args.output, args.expect_stride)
-    if result.offsets_size != 24:
+    if result.offsets_size != 32:
         raise GraphError(
             f"{args.output}: wrote a {result.offsets_size}-byte Offsets struct; "
-            "the Android runtime reads the 24-byte form"
+            "the Android runtime reads the 32-byte form"
         )
     if result.total_byte_count != total or total != os.path.getsize(args.output):
         raise GraphError(f"{args.output}: written binary is not self-consistent")
@@ -321,6 +337,11 @@ def cmd_transplant(args):
 def cmd_verify(args):
     graph = parse(read_binary(args.binary))
     require_v1(graph, args.binary, args.expect_stride)
+    if graph.offsets_size != 32:
+        raise GraphError(
+            f"{args.binary}: {graph.offsets_size}-byte Offsets; "
+            "the Android runtime expects the 32-byte form"
+        )
     if graph.total_byte_count != graph.file_size:
         raise GraphError(
             f"{args.binary}: total_byte_count={graph.total_byte_count} does not match "

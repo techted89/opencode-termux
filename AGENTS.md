@@ -44,7 +44,7 @@ This repository cross-compiles OpenCode for Android/Termux (aarch64) using GitHu
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Bun | 1.3.2 host / 1.2.13 target | Host needs `Bun.build({compile})`; 1.3.2's 32-byte Offsets are down-converted to the 24-byte form 1.2.13 reads |
+| Bun | 1.3.2 host / 1.2.13 target | Host needs `Bun.build({compile})`; `android-support.patch` gives the 1.2.13 target the same 32-byte Offsets as host 1.3.2 |
 | Zig | 0.16.0 | Builds `libopentui.so` |
 | Android NDK | r28b | API 24, aarch64-linux-android |
 | WebKit/JSC | 017930ebf9 | Bundled in Bun |
@@ -96,12 +96,21 @@ platform packages whose `os`/`cpu` do not match the runner, but the bundler reso
 
 ### 6. Termux prints `1.2.13` / Bun help instead of OpenCode
 **Symptom**: `opencode --version` prints `1.2.13`; `opencode` prints Bun's CLI help.
-**Root cause**: Termux may enter the binary through `linker64`, so `/proc/self/exe` points at the
-linker rather than the file containing the module graph. Bun 1.2.13 then falls back to its CLI.
-**Fix**: `patches/bun/standalone-self-exe.patch` backports upstream `BUN_SELF_EXE`
-(oven-sh/bun#26752); the launcher exports the absolute `opencode.bin` path, and
-`build-opencode.sh` fails if either the launcher export or the runtime marker is missing.
-**Verify**: `grep -qF 'export BUN_SELF_EXE=' build/dist/bin/opencode` and
+**Root causes**:
+1. Termux may enter the binary through `linker64`, so `/proc/self/exe` points at the
+   linker rather than the file containing the module graph. `BUN_SELF_EXE` addresses this.
+2. More importantly, the Android runtime's `Offsets` is 32 bytes because
+   `android-support.patch` extends Bun 1.2.13 to match host Bun 1.3.2. Writing a
+   24-byte transplant makes the runtime read the module list as offsets; it then
+   silently falls back to the CLI. This was the `.2`/`.3` failure.
+**Fix**: `patches/bun/standalone-self-exe.patch` backports `BUN_SELF_EXE`
+(oven-sh/bun#26752), and `scripts/transplant-bun-graph.py` must preserve or
+widen to the 32-byte `Offsets`. The launcher exports the absolute `opencode.bin`
+path, and `build-opencode.sh` fails if either the launcher export or the runtime
+marker is missing.
+**Verify**: `python3 scripts/transplant-bun-graph.py verify build/dist/libexec/opencode/opencode.bin --expect-stride 36`
+must report `offsets=32B`, plus the launcher/runtime marker checks:
+`grep -qF 'export BUN_SELF_EXE=' build/dist/bin/opencode` and
 `grep -aqF 'BUN_SELF_EXE' build/dist/libexec/opencode/opencode.bin`.
 
 ## Build Order (must be sequential)
