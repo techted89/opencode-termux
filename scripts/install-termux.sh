@@ -35,7 +35,7 @@ DEFAULT_PREFIX="/data/data/com.termux/files/usr"
 REPO="${OPENCODE_TERMUX_REPO:-techted89/opencode-termux}"
 API_ROOT="https://api.github.com/repos/${REPO}"
 RELEASE_ROOT="https://github.com/${REPO}/releases"
-INSTALLER_VERSION="2.0.0"
+INSTALLER_VERSION="2.0.1"
 
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 warn() { printf '\nWARNING: %s\n' "$*" >&2; }
@@ -74,6 +74,7 @@ The installer verifies:
   * SHA256SUMS for the selected artifact
   * ELF e_machine == AArch64 (183) for opencode.bin and libopentui.so
   * the launcher exports BUN_SELF_EXE and the runtime contains the override
+  * the launcher exports TMPDIR under the writable Termux prefix
   * `opencode --version` reports the expected OpenCode version and not Bun
     (on aarch64 devices only)
 
@@ -192,7 +193,15 @@ if [ "$is_termux" -eq 1 ] && [ "$host_arch" != "aarch64" ] && [ "$allow_foreign"
 fi
 
 mkdir -p "$prefix" || die "cannot create prefix: $prefix"
-work="$(mktemp -d "${TMPDIR:-/tmp}/opencode-install.XXXXXX")" || die "cannot create temporary directory"
+# Android/Termux has no writable /tmp. OpenCode uses os.tmpdir()/opencode as
+# its scratch directory, so use the writable prefix temp dir for the installer
+# and export it to the launcher and smoke test.
+if [ -z "${TMPDIR:-}" ] || [ ! -d "$TMPDIR" ] || [ ! -w "$TMPDIR" ]; then
+    TMPDIR="$prefix/tmp"
+fi
+mkdir -p "$TMPDIR" || die "cannot create temporary directory: $TMPDIR"
+export TMPDIR
+work="$(mktemp -d "$TMPDIR/opencode-install.XXXXXX")" || die "cannot create temporary directory"
 
 cleanup() {
     if [ "$success" -ne 1 ] && [ -n "$backup" ] && [ -d "$backup" ]; then
@@ -399,6 +408,8 @@ prepare_package() {
         || die "launcher does not export BUN_SELF_EXE; refusing to install a Bun-fallback build"
     grep -aqF 'BUN_SELF_EXE' "$payload/libexec/opencode/opencode.bin" \
         || die "runtime lacks the BUN_SELF_EXE override; refusing to install a Bun-fallback build"
+    grep -qF 'export TMPDIR=' "$launcher" \
+        || die "launcher does not export TMPDIR; OpenCode would use /tmp/opencode"
     note "Launcher/runtime BUN_SELF_EXE markers OK"
     [ -n "$expected_version" ] || derive_expected_version "$file"
 }
@@ -502,9 +513,9 @@ check_version() {
         *1.2.13*|*"Usage: bun"*|*"Bun v"*)
             local direct_out direct_status
             if have timeout; then
-                direct_out="$(LD_LIBRARY_PATH="$prefix/lib" BUN_SELF_EXE="$prefix/libexec/opencode/opencode.bin" timeout 30 "$prefix/libexec/opencode/opencode.bin" --version 2>&1)" && direct_status=0 || direct_status=$?
+                direct_out="$(TMPDIR="$TMPDIR" LD_LIBRARY_PATH="$prefix/lib" BUN_SELF_EXE="$prefix/libexec/opencode/opencode.bin" timeout 30 "$prefix/libexec/opencode/opencode.bin" --version 2>&1)" && direct_status=0 || direct_status=$?
             else
-                direct_out="$(LD_LIBRARY_PATH="$prefix/lib" BUN_SELF_EXE="$prefix/libexec/opencode/opencode.bin" "$prefix/libexec/opencode/opencode.bin" --version 2>&1)" && direct_status=0 || direct_status=$?
+                direct_out="$(TMPDIR="$TMPDIR" LD_LIBRARY_PATH="$prefix/lib" BUN_SELF_EXE="$prefix/libexec/opencode/opencode.bin" "$prefix/libexec/opencode/opencode.bin" --version 2>&1)" && direct_status=0 || direct_status=$?
             fi
             printf '>>> Direct BUN_SELF_EXE test (exit %s): %s\n' "$direct_status" "${direct_out:-<no output>}" >&2
             die "opencode fell back to Bun ($out); BUN_SELF_EXE is not taking effect"
@@ -619,6 +630,9 @@ check_install() {
     grep -aqF 'BUN_SELF_EXE' "$prefix/libexec/opencode/opencode.bin" \
         && printf 'BUN_SELF_EXE runtime marker:   OK\n' \
         || { printf 'BUN_SELF_EXE runtime marker:   MISSING\n' >&2; rc=1; }
+    grep -qF 'export TMPDIR=' "$prefix/bin/opencode" \
+        && printf 'TMPDIR launcher marker:       OK\n' \
+        || { printf 'TMPDIR launcher marker:       MISSING\n' >&2; rc=1; }
     [ -f "$prefix/lib/libopentui.so" ] && printf 'libopentui.so:  OK\n' || { printf 'libopentui.so:  MISSING\n' >&2; rc=1; }
     [ -f "$prefix/lib/libc++_shared.so" ] && printf 'libc++_shared:  OK\n' || { printf 'libc++_shared:  MISSING\n' >&2; rc=1; }
     if have rg; then printf 'ripgrep:        OK (%s)\n' "$(rg --version | head -n 1)"; else printf 'ripgrep:        MISSING (pkg install ripgrep)\n' >&2; rc=1; fi

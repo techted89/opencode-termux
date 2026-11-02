@@ -500,6 +500,7 @@ jobs:
           # this, Termux's linker64 /proc/self/exe fallback runs Bun's CLI instead.
           sh -n "$LAUNCHER"
           grep -qF 'export BUN_SELF_EXE=' "$LAUNCHER" || { echo "ERROR: launcher does not export BUN_SELF_EXE" >&2; exit 1; }
+          grep -qF 'export TMPDIR=' "$LAUNCHER" || { echo "ERROR: launcher does not export TMPDIR" >&2; exit 1; }
           grep -aqF 'BUN_SELF_EXE' "$LIBEXEC" || { echo "ERROR: Bun runtime lacks the BUN_SELF_EXE override" >&2; exit 1; }
           echo "=== Staged layout ==="
           find "${WORK_DIR}/dist" -maxdepth 3 -type f | sort
@@ -667,6 +668,7 @@ jobs:
           [ -n "$BINARY" ] || { echo "ERROR: packaged opencode.bin missing" >&2; exit 1; }
           sh -n "$LAUNCHER"
           grep -qF 'export BUN_SELF_EXE=' "$LAUNCHER" || { echo "ERROR: packaged launcher does not export BUN_SELF_EXE" >&2; exit 1; }
+          grep -qF 'export TMPDIR=' "$LAUNCHER" || { echo "ERROR: packaged launcher does not export TMPDIR" >&2; exit 1; }
           grep -aqF 'BUN_SELF_EXE' "$BINARY" || { echo "ERROR: packaged runtime lacks the BUN_SELF_EXE override" >&2; exit 1; }
           python3 scripts/transplant-bun-graph.py verify "$BINARY" --expect-stride "$MODULE_GRAPH_STRIDE"
           file artifacts/extracted/lib/libopentui.so | grep -q "aarch64" || { echo "ERROR: packaged libopentui.so is not aarch64" >&2; exit 1; }
@@ -725,6 +727,7 @@ jobs:
           [ -n "$BINARY" ] || { echo "ERROR: release binary missing" >&2; exit 1; }
           sh -n "$LAUNCHER"
           grep -qF 'export BUN_SELF_EXE=' "$LAUNCHER"
+          grep -qF 'export TMPDIR=' "$LAUNCHER"
           grep -aqF 'BUN_SELF_EXE' "$BINARY"
           file "$BINARY" | grep -q aarch64
           file extracted/lib/libopentui.so | grep -q aarch64

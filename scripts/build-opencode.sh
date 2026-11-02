@@ -303,6 +303,18 @@ DIR="$(CDPATH= cd -- "$(dirname "$SELF")" && pwd)"
 PREFIX="${PREFIX:-$(CDPATH= cd -- "$DIR/.." && pwd)}"
 export PREFIX
 
+# Android has no writable /tmp. OpenCode's global scratch directory is
+# os.tmpdir()/opencode, so give it the writable Termux temp directory before
+# the app starts; otherwise startup fails with mkdir '/tmp/opencode' EACCES.
+if [ -z "${TMPDIR:-}" ] || [ ! -d "$TMPDIR" ] || [ ! -w "$TMPDIR" ]; then
+    TMPDIR="$PREFIX/tmp"
+fi
+mkdir -p "$TMPDIR" || {
+    echo "opencode: error: cannot create temp directory $TMPDIR" >&2
+    exit 1
+}
+export TMPDIR="$TMPDIR"
+
 # Native renderer library. OPENTUI_LIB_PATH is what @opentui/core consults;
 # LD_LIBRARY_PATH covers DT_NEEDED lookups such as libc++_shared.so.
 for candidate in "$PREFIX/lib" "$PREFIX/libexec/opencode" "$DIR/lib"; do
@@ -332,6 +344,10 @@ chmod 755 "$BIN_DIR/opencode"
 sh -n "$BIN_DIR/opencode"
 grep -qF 'export BUN_SELF_EXE=' "$BIN_DIR/opencode" || {
     echo "ERROR: launcher does not export BUN_SELF_EXE" >&2
+    exit 1
+}
+grep -qF 'export TMPDIR=' "$BIN_DIR/opencode" || {
+    echo "ERROR: launcher does not export TMPDIR" >&2
     exit 1
 }
 grep -aqF 'BUN_SELF_EXE' "$LIBEXEC_DIR/opencode.bin" || {

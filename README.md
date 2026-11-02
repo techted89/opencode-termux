@@ -44,9 +44,10 @@ the deb and standalone-zip alternatives.
 [`scripts/install-termux.sh`](scripts/install-termux.sh) is the all-in-one
 installer. It needs no root, downloads the latest release (or a pinned tag or
 local archive), installs `ripgrep` and the required installer tools on Termux,
-verifies `SHA256SUMS`, checks the aarch64 ELF headers and the packaged
-`BUN_SELF_EXE` launcher/runtime markers, backs up the previous installation, and
-rolls back automatically if `opencode --version` reports Bun's `1.2.13` instead
+verifies `SHA256SUMS`, checks the aarch64 ELF headers, the packaged
+`BUN_SELF_EXE` launcher/runtime markers, and the `TMPDIR` launcher marker,
+backs up the previous installation, and rolls back automatically if
+`opencode --version` reports Bun's `1.2.13` instead
 of the OpenCode version. It also installs into the correct `$PREFIX/bin`,
 `$PREFIX/libexec/opencode`, and `$PREFIX/lib` locations and adds the prefix to
 PATH.
@@ -341,6 +342,14 @@ the linker instead of the file containing the graph. `patches/bun/standalone-sel
 backports upstream `BUN_SELF_EXE` ([oven-sh/bun#26752](https://github.com/oven-sh/bun/issues/26752));
 the launcher exports it before `exec`, and the build and CI verification check the
 marker in both the launcher and the packaged runtime.
+
+### Termux temp directory
+
+Android provides no writable `/tmp`, while OpenCode's scratch directory is
+`os.tmpdir()/opencode`. The launcher exports `TMPDIR="$PREFIX/tmp"` (or keeps an
+inherited writable `TMPDIR`) and creates it before `exec`; the installer does the
+same before its smoke test. Without this, OpenCode loads successfully and then
+fails with `EACCES: permission denied, mkdir '/tmp/opencode'`.
 
 ### Upgrade status: Bun 1.3.14
 

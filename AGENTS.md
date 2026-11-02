@@ -113,6 +113,18 @@ must report `offsets=32B`, plus the launcher/runtime marker checks:
 `grep -qF 'export BUN_SELF_EXE=' build/dist/bin/opencode` and
 `grep -aqF 'BUN_SELF_EXE' build/dist/libexec/opencode/opencode.bin`.
 
+### 7. `EACCES: permission denied, mkdir '/tmp/opencode'`
+**Symptom**: OpenCode's graph loads, then startup exits with
+`EACCES: permission denied, mkdir '/tmp/opencode'`.
+**Root cause**: Android has no writable `/tmp`; OpenCode's scratch directory is
+`os.tmpdir()/opencode`. The launcher did not export `TMPDIR`, so the app used
+the unusable default.
+**Fix**: The launcher and installer export `TMPDIR="$PREFIX/tmp"` (or keep an
+inherited writable `TMPDIR`) and create it. `build-opencode.sh` and the installer
+reject a launcher without the `export TMPDIR=` marker.
+**Verify**: `grep -qF 'export TMPDIR=' build/dist/bin/opencode`, and on device
+`opencode --version` prints the OpenCode version.
+
 ## Build Order (must be sequential)
 
 1. **ICU** → `scripts/build-icu.sh`
@@ -163,6 +175,7 @@ python3 scripts/lint-patch-application.py
 python3 scripts/transplant-bun-graph.py verify build/dist/libexec/opencode/opencode.bin --expect-stride 36
 bash -n build/dist/bin/opencode
 grep -qF 'export BUN_SELF_EXE=' build/dist/bin/opencode
+grep -qF 'export TMPDIR=' build/dist/bin/opencode
 grep -aqF 'BUN_SELF_EXE' build/dist/libexec/opencode/opencode.bin
 ```
 
