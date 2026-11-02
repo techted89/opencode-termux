@@ -41,25 +41,39 @@ the deb and standalone-zip alternatives.
 
 ### Installer script (recommended)
 
-[`scripts/install-termux.sh`](scripts/install-termux.sh) installs any of the four
-release artifacts into `$PREFIX`. It needs no root, verifies `SHA256SUMS` when the
-file sits next to the artifact, checks the aarch64 ELF headers, and keeps the
-previous launcher as `$PREFIX/bin/opencode.pre-install`.
+[`scripts/install-termux.sh`](scripts/install-termux.sh) is the all-in-one
+installer. It needs no root, downloads the latest release (or a pinned tag or
+local archive), installs `ripgrep` and the required installer tools on Termux,
+verifies `SHA256SUMS`, checks the aarch64 ELF headers and the packaged
+`BUN_SELF_EXE` launcher/runtime markers, backs up the previous installation, and
+rolls back automatically if `opencode --version` reports Bun's `1.2.13` instead
+of the OpenCode version. It also installs into the correct `$PREFIX/bin`,
+`$PREFIX/libexec/opencode`, and `$PREFIX/lib` locations and adds the prefix to
+PATH.
 
 ```bash
-# from a checkout of this repo, with the artifact downloaded next to it
-chmod +x scripts/install-termux.sh
-./scripts/install-termux.sh opencode-1.19.4-android-aarch64.zip
+# download the installer, then use the interactive menu
+curl -LO https://github.com/techted89/opencode-termux/releases/latest/download/install-termux.sh
+chmod +x install-termux.sh
+./install-termux.sh
 
-# a .deb, .pkg.tar.xz, or .tar.xz works the same way
-./scripts/install-termux.sh opencode_1.19.4_aarch64.deb
+# or update non-interactively to the latest release
+./install-termux.sh --latest --yes
 
-# pass an https URL instead of a path to download and install in one step
-./scripts/install-termux.sh https://github.com/.../opencode-1.19.4-android-aarch64.zip
+# pin a release tag
+./install-termux.sh --tag v1.19.4-android.1
+
+# install a local archive or a direct release URL
+./install-termux.sh opencode-1.19.4-android-aarch64.tar.xz
+./install-termux.sh https://github.com/techted89/opencode-termux/releases/download/v1.19.4-android.1/opencode-1.19.4-android-aarch64.tar.xz
+
+# inspect or remove the installation (configuration and backups are kept)
+./install-termux.sh --check
+./install-termux.sh --uninstall --yes
 ```
 
-With no artifact argument it picks a matching package from the current directory.
-The manual package-manager routes are below.
+With no arguments in a terminal it shows the menu; the manual package-manager
+routes are below.
 
 ### Option 1: Standalone binary (easiest)
 
@@ -69,7 +83,7 @@ The manual package-manager routes are below.
 
 ```bash
 # Download the latest "opencode-*-android-aarch64.zip" from
-#   https://github.com/guysoft/opencode-termux/releases/latest
+#   https://github.com/techted89/opencode-termux/releases/latest
 # Then install:
 
 unzip -o opencode-*-android-aarch64.zip -d "$PREFIX"
@@ -86,16 +100,16 @@ opencode
 ### Option 2: Pacman package (recommended if using pacman)
 
 ```bash
-curl -LO https://github.com/guysoft/opencode-termux/releases/latest/download/opencode-aarch64.pkg.tar.xz
-pacman -U opencode-*-aarch64.pkg.tar.xz
+curl -LO https://github.com/techted89/opencode-termux/releases/latest/download/opencode-1.19.4-1-aarch64.pkg.tar.xz
+pacman -U opencode-1.19.4-1-aarch64.pkg.tar.xz
 opencode
 ```
 
 ### Option 3: Deb package
 
 ```bash
-curl -LO https://github.com/guysoft/opencode-termux/releases/latest/download/opencode-aarch64.deb
-dpkg -i opencode-*-aarch64.deb
+curl -LO https://github.com/techted89/opencode-termux/releases/latest/download/opencode_1.19.4_aarch64.deb
+dpkg -i opencode_1.19.4_aarch64.deb
 opencode
 ```
 
