@@ -94,6 +94,16 @@ platform packages whose `os`/`cpu` do not match the runner, but the bundler reso
 **Fix**: `build-opencode-android.ts` uses the new worker path and redirects the seven non-host
 `@opentui/core-*` imports with a Bun.build plugin that returns `OPENTUI_LIB_PATH` at runtime.
 
+### 6. Termux prints `1.2.13` / Bun help instead of OpenCode
+**Symptom**: `opencode --version` prints `1.2.13`; `opencode` prints Bun's CLI help.
+**Root cause**: Termux may enter the binary through `linker64`, so `/proc/self/exe` points at the
+linker rather than the file containing the module graph. Bun 1.2.13 then falls back to its CLI.
+**Fix**: `patches/bun/standalone-self-exe.patch` backports upstream `BUN_SELF_EXE`
+(oven-sh/bun#26752); the launcher exports the absolute `opencode.bin` path, and
+`build-opencode.sh` fails if either the launcher export or the runtime marker is missing.
+**Verify**: `grep -qF 'export BUN_SELF_EXE=' build/dist/bin/opencode` and
+`grep -aqF 'BUN_SELF_EXE' build/dist/libexec/opencode/opencode.bin`.
+
 ## Build Order (must be sequential)
 
 1. **ICU** → `scripts/build-icu.sh`
@@ -142,11 +152,15 @@ file build/dist/libexec/opencode/opencode.bin
 readelf -h build/dist/libexec/opencode/opencode.bin | grep -E "Machine|Class"
 python3 scripts/lint-patch-application.py
 python3 scripts/transplant-bun-graph.py verify build/dist/libexec/opencode/opencode.bin --expect-stride 36
+bash -n build/dist/bin/opencode
+grep -qF 'export BUN_SELF_EXE=' build/dist/bin/opencode
+grep -aqF 'BUN_SELF_EXE' build/dist/libexec/opencode/opencode.bin
 ```
 
 ## Patches Applied
 
 - `patches/bun/android-support.patch` — Android sysroot, seccomp, ARM64 flags
+- `patches/bun/standalone-self-exe.patch` — `BUN_SELF_EXE` override for Termux/linker64 (upstream #26752)
 - `patches/webkit/android-support.patch` — JSCOnly Android build fixes
 - `patches/zig/posix-android-sigaction.patch` — Bionic sigaction/sigprocmask bypass
 - `patches/opentui/v2-0.5.10-android.patch` — aarch64-linux-android target, bionic sysroot, u32 bounds checks

@@ -268,45 +268,61 @@ Bun has zero Android support. Every patch falls into one of these categories:
 
 Since `bun build --compile` has no Android cross-compilation target, we use a manual approach:
 
-1. Use **host Bun (v1.2.13)** to `bun build --compile` OpenCode for the host platform
+1. Use **host Bun (v1.3.2)** to `bun build --compile` OpenCode for the host platform
 2. Extract the serialized **module graph** from the host standalone binary by locating the `\n---- Bun! ----\n` trailer and reading the `Offsets` struct
 3. Patch the module graph in-place (fix `undici` global reference)
-4. Before bundling, swap x86_64 `libopentui.so` with the ARM64 Android-built version, so it gets embedded in the module graph
+4. Stage the ARM64 Android-built `libopentui.so` and expose it at runtime through `OPENTUI_LIB_PATH`; it is not embedded in the graph
 5. Append the module graph to our **Android Bun** binary
 6. Write a new 8-byte `total_byte_count` footer
 
 The standalone binary format:
 ```
 [Android Bun binary (~96 MB)]
-[Module graph bytes (~46 MB)]
+[Module graph bytes (~96 MB)]
 [total_byte_count as u64 LE (8 bytes)]
 ```
 
-### Why the host Bun must match the target Bun
+### Why host and target Bun must be compatible
 
 The serialized module graph is not self-describing: both the `Offsets` struct and the
 `CompiledModuleGraphFile` stride are positional, so the host bundler and the Android
-runtime must come from compatible Bun releases.
+runtime must use compatible Bun releases.
 
 | Bun | `Offsets` | Module stride | Layout |
 |---|---|---|---|
-| <= 1.3.2 | 24 bytes | 36 bytes (4 StringPointers + 3 u8 + 1 padding) | graph ends at `EOF-8`, `total_byte_count == file size` |
+| 1.2.x (target: 1.2.13) | 24 bytes | 36 bytes (4 StringPointers + 3 u8 + 1 padding) | graph ends at `EOF-8`, `total_byte_count == file size` |
+| 1.3.0-1.3.2 (host: 1.3.2) | 32 bytes (`compile_exec_argv`, `flags`) | 36 bytes (same module list) | host graph ends at `EOF-8`; the transplant strips the extra fields for the 1.2.13 runtime |
 | >= 1.3.11 | 32 bytes | 52 bytes (6 StringPointers + 4 u8) | trailing data after the trailer, no size footer at EOF |
 
-This pipeline pins **Bun 1.2.13** for host and target (36-byte stride, layout v1).
+This pipeline pins **host Bun 1.3.2** and **target Bun 1.2.13**. Both use the
+36-byte module stride; 1.3.2 writes the 32-byte `Offsets` variant, and
+`scripts/transplant-bun-graph.py` strips `compile_exec_argv`/`flags` to the
+24-byte struct the Android runtime reads. This is a **source-mode** graft: upstream
+says the graph is not portable between arbitrary Bun binaries (oven-sh/bun#43638),
+and a bytecode graph would embed host builtins, so the build must not use
+`--bytecode`.
+
 `scripts/transplant-bun-graph.py` locates the trailer from the end of the file,
 auto-detects the `Offsets` size and the module stride, validates every StringPointer
 against the string-data region, and refuses to graft a graph whose stride does not
 match the target. CI runs its `verify` subcommand on the finished binary, so a
 host/target mismatch fails the build instead of shipping a binary that dies at startup.
 
-The previous helper hardcoded a 32-byte `Offsets` struct (the 1.3.x layout). Against a
-1.2.13 host binary that read past the struct and derived a negative runtime size, so the
-transplant step could not succeed.
+The previous helper hardcoded a 32-byte `Offsets` struct (the 1.3.x layout).
+Against the 1.2.13 target runtime it read past the struct and derived a
+negative graph size, so the transplant step could not succeed.
 
-OpenCode's monorepo uses the `catalog:` workspace protocol, which Bun 1.2.13 cannot
-resolve. `build-opencode.sh` rewrites those references from the root catalog before
-`bun install`, so the host bundler stays on the pinned release.
+OpenCode's monorepo uses the `catalog:` workspace protocol. `build-opencode.sh`
+rewrites those references from the root catalog before `bun install`, so the host
+bundler remains independent of `catalog:` support.
+
+### Termux self-executable lookup
+
+Termux can enter an executable through `linker64`, where `/proc/self/exe` points at
+the linker instead of the file containing the graph. `patches/bun/standalone-self-exe.patch`
+backports upstream `BUN_SELF_EXE` ([oven-sh/bun#26752](https://github.com/oven-sh/bun/issues/26752));
+the launcher exports it before `exec`, and the build and CI verification check the
+marker in both the launcher and the packaged runtime.
 
 ### Upgrade status: Bun 1.3.14
 
@@ -348,7 +364,7 @@ python3 scripts/transplant-bun-graph.py inspect path/to/standalone-binary
 
 | Workaround | Why |
 |-----------|-----|
-| Host Bun pinned to 1.2.13 | Module graph struct compatibility between host and target Bun (see above) |
+| Host Bun pinned to 1.3.2, target 1.2.13 | 36-byte module stride; the transplant strips 1.3.x `Offsets` fields for the 1.2.13 runtime (see above) |
 | `close_range()` replaced with `/proc/self/fd` iteration | Android seccomp blocks the `close_range` syscall in app processes |
 | `preadv2`/`pwritev2`/`epoll_pwait2` return ENOSYS | Seccomp may block these; callers fall back gracefully |
 | `setenv("JSC_*")` before `JSC::initialize()` | Options API is reset during initialization; env vars survive the reset |

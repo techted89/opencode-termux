@@ -81,7 +81,7 @@ esac
 [ -d "$prefix" ] || die "prefix does not exist: $prefix"
 
 if [ -z "$artifact" ]; then
-    for pattern in 'opencode-*-android-aarch64.zip' 'opencode-*-android-aarch64.tar.xz' 'opencode_*_aarch64.deb' 'opencode-*-aarch64.pkg.tar.xz'; do
+    for pattern in 'opencode-*-android-aarch64.tar.xz' 'opencode-*-android-aarch64.zip' 'opencode_*_aarch64.deb' 'opencode-*-aarch64.pkg.tar.xz'; do
         for candidate in $pattern; do
             if [ -f "$candidate" ]; then
                 artifact="$candidate"
@@ -111,7 +111,7 @@ if [[ "$artifact" == http://* || "$artifact" == https://* ]]; then
     fi
 fi
 
-[ -f "$artifact" ] || die "artifact not found: $artifact"
+[ -f "$artifact" ] || die "artifact not found: $artifact (download it first, or pass an https:// URL to the release asset)"
 
 artifact_dir="$(cd "$(dirname "$artifact")" && pwd)"
 base="$(basename "$artifact")"
@@ -204,7 +204,14 @@ note "Installed $(basename "$base")"
 ls -lh "$prefix/bin/opencode" "$prefix/libexec/opencode/opencode.bin" "$prefix/lib/libopentui.so"
 
 if [ "$(uname -m 2>/dev/null || true)" = "aarch64" ]; then
-    "$prefix/bin/opencode" --version 2>/dev/null || true
+    version="$("$prefix/bin/opencode" --version 2>&1 || true)"
+    printf '>>> opencode --version: %s\n' "${version:-<no output>}"
+    case "$version" in
+        1.2.13*|*"Usage: bun"*|*"Bun v"*)
+            printf 'WARNING: opencode fell back to Bun; the launcher may not be exporting BUN_SELF_EXE correctly.\n' >&2
+            ;;
+    esac
+    [ -n "$version" ] || printf 'WARNING: opencode --version produced no output.\n' >&2
 fi
 
 cat <<EOF

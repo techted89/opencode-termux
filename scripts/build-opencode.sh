@@ -39,8 +39,10 @@ WEBKIT_OUTPUT_ABS="$(abspath "$WEBKIT_OUTPUT")"
 DIST_DIR_ABS="$(abspath "$DIST_DIR")"
 
 HOST_BUN="${HOST_BUN:-bun}"
+HOST_BUN_VERSION="$("$HOST_BUN" --version 2>/dev/null || echo unknown)"
 
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
+echo ">>> Host Bun: $HOST_BUN_VERSION; target Bun: $BUN_VERSION (module stride ${MODULE_GRAPH_STRIDE:-unset})"
 
 # Clone OpenCode if needed
 if [ ! -d "$OPENCODE_SRC_ABS/.git" ]; then
@@ -51,8 +53,8 @@ else
 fi
 
 # Patch package.json: replace "catalog:" references with actual versions
-# from the catalog field, so host bun 1.2.13 can resolve them without
-# needing catalog support (which bun 1.2.13 may lack).
+# from the catalog field so the host bundler can resolve them without
+# relying on catalog support.
 # Also remove @types/bun from dependencies/overrides to avoid git clone failures.
 OPENCODE_PKG_JSON="$OPENCODE_SRC_ABS/package.json"
 if [ -f "$OPENCODE_PKG_JSON" ]; then
@@ -162,15 +164,13 @@ OPENCODE_PKG="$OPENCODE_SRC_ABS/packages/opencode"
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC_ABS"
 
-# Bun 1.2.13 cannot parse the `catalog:` entries in OpenCode's committed bun.lock:
-# it treats the unknown protocol as a Git spec and aborts with
-#   error: "git clone" for "@types/bun" failed
-# even after the manifests above are rewritten (run 41282039365). Scrubbing single
-# lockfile entries only moved the failure to @types/node, so discard the lockfile and
-# let Bun resolve the rewritten manifests. Verified locally with Bun 1.2.13.
+# OpenCode's committed lockfile can contain `catalog:` entries that older Bun
+# releases treat as a Git spec. The host bundler is pinned to 1.3.2, but discard
+# the lockfile so the install does not depend on catalog support; let Bun resolve
+# the rewritten manifests.
 for lockfile in bun.lock bun.lockb bun.lock.json; do
     if [ -f "$lockfile" ]; then
-        echo ">>> Removing $lockfile (Bun 1.2.13 cannot resolve catalog: entries)"
+        echo ">>> Removing $lockfile (removing catalog: lockfile)"
         rm -f "$lockfile"
     fi
 done
@@ -250,6 +250,12 @@ OPENCODE_VERSION="$OPENCODE_VERSION" \
     OPENCODE_DIR="$OPENCODE_PKG" \
     "$HOST_BUN" run "$BUILD_SCRIPT_LOCAL"
 
+if [ ! -s "$DIST_DIR_ABS/opencode-host" ]; then
+    echo "ERROR: $HOST_BUN did not produce a standalone host binary." >&2
+    echo "       Bun.build({ compile }) requires host Bun 1.3.2; 1.2.13 ignores it." >&2
+    exit 1
+fi
+
 # Clean up copied script
 rm -f "$BUILD_SCRIPT_LOCAL"
 
@@ -260,6 +266,10 @@ rm -f "$BUILD_SCRIPT_LOCAL"
 #   libexec/opencode/opencode.bin    actual ELF (Bun runtime + module graph)
 #   lib/*.so*                        libopentui.so, libc++_shared.so, libtagfix.so
 # ---------------------------------------------------------------------------
+# Host Bun 1.3.2 emits 32-byte Offsets + 36-byte modules; the 1.2.13 target
+# reads 24-byte Offsets + 36-byte modules. transplant-bun-graph.py strips the
+# 1.3.x fields. The graph is source-only (no --bytecode); upstream does not
+# promise portability between arbitrary Bun binaries (oven-sh/bun#43638).
 echo ">>> Transplanting module graph onto the Android Bun runtime..."
 BIN_DIR="$DIST_DIR_ABS/bin"
 LIBEXEC_DIR="$DIST_DIR_ABS/libexec/opencode"
@@ -316,6 +326,17 @@ echo "opencode: error: could not find opencode.bin (reinstall the package)" >&2
 exit 127
 WRAPPER
 chmod 755 "$BIN_DIR/opencode"
+
+# Fail the build if the Termux self-exe fix is not actually in the artifact.
+sh -n "$BIN_DIR/opencode"
+grep -qF 'export BUN_SELF_EXE=' "$BIN_DIR/opencode" || {
+    echo "ERROR: launcher does not export BUN_SELF_EXE" >&2
+    exit 1
+}
+grep -aqF 'BUN_SELF_EXE' "$LIBEXEC_DIR/opencode.bin" || {
+    echo "ERROR: Bun runtime lacks the BUN_SELF_EXE override" >&2
+    exit 1
+}
 
 # Native libraries
 OPENTUI_LIB_SRC="$WEBKIT_OUTPUT_ABS/lib/libopentui.so"

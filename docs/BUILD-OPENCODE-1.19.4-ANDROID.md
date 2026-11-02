@@ -77,7 +77,7 @@ and is out of scope; see [§19.7](#197-v1-vs-v2-pipelines).
 | Target triple | `aarch64-linux-android` (ABI `arm64-v8a`) |
 | Minimum API | 24 (Android 7.0) |
 | Android NDK | r28b (`28.1.13356709`), Clang 19 |
-| Bun (host **and** target) | `1.2.13` (tag `bun-v1.2.13`) |
+| Bun (host / target) | `1.3.2` (host bundler) / `1.2.13` (Android runtime; tag `bun-v1.2.13`) |
 | WebKit/JSC | `017930ebf915121f8f593bef61cbbca82d78132d` (oven-sh/WebKit) |
 | ICU | 75.1 (static) |
 | TinyCC | `b91835d8701523e895a2b447713630069514e291` (oven-sh/tinycc) |
@@ -188,7 +188,7 @@ With warm WebKit and Bun caches a full CI run is roughly 4 minutes.
 | Variable | Default | Purpose |
 |---|---|---|
 | `REPO_ROOT` | derived | Repository root |
-| `BUN_VERSION` | `1.2.13` | Host and target Bun |
+| `BUN_VERSION` | `1.2.13` | Target Bun (the host bundler is installed separately at 1.3.2) |
 | `BUN_TAG` | `bun-v${BUN_VERSION}` | Git tag to clone |
 | `MODULE_GRAPH_STRIDE` | `36` | `CompiledModuleGraphFile` stride; enforced by the transplant tool |
 | `WEBKIT_COMMIT` | `017930eb…` | oven-sh/WebKit commit |
@@ -411,9 +411,10 @@ the serialized module graph onto the Android runtime.
 4. Stops. Format handling lives in the Python tool.
 
 `build-opencode.sh` first rewrites `catalog:` references from the root `package.json` catalog
-(Bun 1.2.13 cannot resolve the workspace protocol) and drops `@types/bun`, whose catalog
-version forces a `git clone` that fails in CI. It also swaps the x64 `libopentui.so` in
-`node_modules` for the aarch64 build before bundling, then restores it.
+and drops `@types/bun`, whose catalog version forces a `git clone` that fails in CI. The host
+bundler is pinned to 1.3.2; the rewrite keeps the install independent of catalog support.
+The ARM64 `libopentui.so` is staged separately and exposed through `OPENTUI_LIB_PATH`; the
+node_modules platform imports are redirected by the Bun.build plugin.
 
 ### 10.2 Standalone binary format (measured, not assumed)
 
@@ -424,22 +425,33 @@ version forces a `git clone` that fails in CI. It also swaps the x64 `libopentui
 
 | Bun | `Offsets` size | fields | module stride | footer |
 |---|---|---|---|---|
-| ≤ 1.3.2 (pinned: 1.2.13) | 24 B | `byte_count u64`, `modules_ptr (u32 off, u32 len)`, `entry_point_id u32`, 4 B pad | 36 B: 4 StringPointers + 3 u8 + 1 pad | trailer at `EOF-8-16`, `total_byte_count == file size` |
-| ≥ 1.3.11 (target of the upgrade) | 32 B | + `compile_exec_argv`, `flags u32` | 52 B: 6 StringPointers + 4 u8 | trailing data after the trailer; no size footer at EOF |
+| 1.2.x (target: 1.2.13) | 24 B | `byte_count u64`, `modules_ptr (u32 off, u32 len)`, `entry_point_id u32`, 4 B pad | 36 B: 4 StringPointers + 3 u8 + 1 pad | trailer at `EOF-8-16`, `total_byte_count == file size` |
+| 1.3.0-1.3.2 (host: 1.3.2) | 32 B | same as 1.2.x + `compile_exec_argv`, `flags u32` | 36 B: 4 StringPointers + 3 u8 + 1 `side` byte | host graph ends at `EOF-8`; the transplant strips the 1.3.x fields for the 1.2.13 runtime |
+| ≥ 1.3.11 (upgrade target) | 32 B | + `compile_exec_argv`, `flags u32` | 52 B: 6 StringPointers + 4 u8 | trailing data after the trailer; no size footer at EOF |
 
 All StringPointer offsets are **relative to the graph start**. Measured examples:
 
 ```
-bun 1.2.13 host build: offsets=24B stride=36B modules=1 entry=0 payload=108B  trailing=8B
-bun 1.3.14 host build: offsets=32B stride=52B modules=1 entry=0 payload=125B trailing=47051B
+bun 1.2.13 target: offsets=24B stride=36B modules=25 entry=0 payload=96389209B
+bun 1.3.2 host:    offsets=32B stride=36B modules=25 entry=0 payload=96389209B
+bun 1.3.14 host:   offsets=32B stride=52B modules=1  entry=0 payload=125B trailing=47051B
 ```
 
 > **Critical history.** The original TypeScript extractor hardcoded `OFFSETS_SIZE = 32` and
-> required the trailer at `EOF-8-16`. The workflow pins Bun **1.2.13**, whose struct is 24
+> required the trailer at `EOF-8-16`. The target runtime is Bun **1.2.13**, whose struct is 24
 > bytes: the read slid 8 bytes past the struct, `byte_count` became garbage, and
 > `hostBunSize = file_length - 8 - moduleGraphSize` went negative. The transplant step could
 > never succeed with the pinned toolchain. `scripts/transplant-bun-graph.py` replaced it and
-> auto-detects both the struct size and the stride.
+> auto-detects both the struct size and the stride. The host is 1.3.2 (32-byte `Offsets`);
+> `transplant()` strips the extra fields before writing the 24-byte target struct.
+
+### 10.2.1 Termux self-executable lookup
+
+Termux may invoke the executable through `linker64`, so `/proc/self/exe` points at the linker
+instead of the file containing the module graph. `patches/bun/standalone-self-exe.patch`
+backports upstream `BUN_SELF_EXE` ([oven-sh/bun#26752](https://github.com/oven-sh/bun/issues/26752));
+the launcher exports the absolute `opencode.bin` path before `exec`. The build and the
+`Validate Build Artifacts` job both check the marker in the launcher and the packaged runtime.
 
 ### 10.3 Transplant algorithm
 
@@ -926,7 +938,7 @@ same script runs on Termux.
 3. Install Android NDK r28b to `/opt/android-ndk`; export `ANDROID_NDK_HOME` and `PATH`.
 4. Install Rust with the `aarch64-linux-android` target (for `lol-html`).
 5. Install Zig 0.16.0 into `build/zig-0.16.0`; export `ZIG_BIN`.
-6. Install host Bun **pinned to 1.2.13** and pre-install `@types/bun` plus all four
+6. Install host Bun **pinned to 1.3.2** and pre-install `@types/bun` plus all four
    `@opentui/core-linux-*` variants to avoid `git clone` fallbacks during `bun install`.
 7. Compute patch hashes (`sha256sum | cut -c1-16`) for cache keys.
 8. Cache ICU prefix, WebKit output, Bun binary, `libopentui.so`, and `opencode-src/node_modules`.
@@ -965,6 +977,13 @@ deleted trees cause `FileNotFound` on the next run) while keeping cached artifac
 
 The original design targeted Bun 1.3.14 (`Offsets` 32 B, stride 52 B). It is **not** a patch
 rebase, and the pipeline stays on 1.2.13 until the work below is done.
+
+**Upstream alternative.** Bun publishes an official Android target from 1.3.14 onward and
+supports `bun build --compile --target=bun-linux-arm64-android`. That is the supported path
+and avoids grafting; it is not used here because OpenCode 1.19.4's build script has no
+Android target (the separate v2/OpenCode 2 pipeline uses its own build script). A hand-built
+graph remains source-only: upstream states it is not portable between arbitrary Bun binaries
+([#43638](https://github.com/oven-sh/bun/issues/43638)).
 
 **Blocker: the build system was replaced.**
 

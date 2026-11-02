@@ -22,6 +22,9 @@ on:
         required: false
         default: 'false'
         type: boolean
+      release_tag:
+        description: 'Optional release tag for manual builds (creates or updates a release)'
+        required: false
 
 env:
   # Core versions - pinned for reproducibility
@@ -34,6 +37,8 @@ env:
   TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.16.0"
+  # CompiledModuleGraphFile stride; must match the target Bun (1.2.13).
+  MODULE_GRAPH_STRIDE: "36"
   # Build configuration
   JOBS: "4"
   WORK_DIR: "./build"
@@ -170,8 +175,13 @@ jobs:
             echo "$HOME/.bun/bin" >> $GITHUB_PATH
             export PATH="$HOME/.bun/bin:$PATH"
           fi
-          echo "Host Bun version: $(bun --version)"
+          ACTUAL="$(bun --version)"
+          echo "Host Bun version: $ACTUAL"
           echo "Target Bun version: $BUN_VERSION"
+          if [ "$ACTUAL" != "$HOST_BUN_VERSION" ]; then
+            echo "ERROR: expected host Bun $HOST_BUN_VERSION, got $ACTUAL" >&2
+            exit 1
+          fi
 
       - name: Pre-install @types/bun and native packages to avoid git clone in CI
         run: |
@@ -457,26 +467,18 @@ jobs:
           key: ${{ steps.cache-opencode-deps.outputs.cache-primary-key }}
 
       # ======================================================================
-      - name: Verify native packages
+      - name: Verify staged native libraries
         run: |
-          echo "=== Verifying native packages ==="
           source scripts/env.sh
-          cd "${OPENCODE_SRC}"
-          echo "Checking @opentui/core-linux-arm64..."
-          if [ -d "node_modules/@opentui/core-linux-arm64" ]; then
-            ls -la node_modules/@opentui/core-linux-arm64/
-            if [ -f "node_modules/@opentui/core-linux-arm64/libopentui.so" ]; then
-              file node_modules/@opentui/core-linux-arm64/libopentui.so | grep aarch64 && echo "ARM64 libopentui.so OK" || echo "WARNING: not ARM64"
-            fi
-          else
-            echo "WARNING: @opentui/core-linux-arm64 not found in node_modules"
-          fi
-          echo "Checking @opentui/core-linux-x64..."
-          if [ -d "node_modules/@opentui/core-linux-x64" ]; then
-            ls -la node_modules/@opentui/core-linux-x64/
-          else
-            echo "WARNING: @opentui/core-linux-x64 not found in node_modules"
-          fi
+          echo "=== Verifying staged native libraries ==="
+          LIB="${WORK_DIR}/dist/lib/libopentui.so"
+          CXX="${WORK_DIR}/dist/lib/libc++_shared.so"
+          [ -f "$LIB" ] || { echo "ERROR: $LIB missing" >&2; exit 1; }
+          [ -f "$CXX" ] || { echo "ERROR: $CXX missing" >&2; exit 1; }
+          file "$LIB" | grep -q "aarch64" || { echo "ERROR: libopentui.so is not aarch64" >&2; file "$LIB"; exit 1; }
+          file "$CXX" | grep -q "aarch64" || { echo "ERROR: libc++_shared.so is not aarch64" >&2; file "$CXX"; exit 1; }
+          readelf -d "$LIB" | grep -q "NEEDED.*libc.so" || { echo "ERROR: libopentui.so is missing NEEDED libc.so" >&2; readelf -d "$LIB"; exit 1; }
+          echo "staged native libraries OK"
 
       - name: Verify OpenCode binary
         run: |
@@ -492,8 +494,13 @@ jobs:
             echo "ERROR: OpenCode binary is not ARM64 architecture"
             exit 1
           fi
-          # Validate the transplanted module graph (offsets, stride, footer)
+          # Validate the transplanted module graph (offsets, stride, footer).
           python3 scripts/transplant-bun-graph.py verify "$LIBEXEC" --expect-stride "$MODULE_GRAPH_STRIDE"
+          # The Termux launcher must hand Bun the real graph-bearing path. Without
+          # this, Termux's linker64 /proc/self/exe fallback runs Bun's CLI instead.
+          sh -n "$LAUNCHER"
+          grep -qF 'export BUN_SELF_EXE=' "$LAUNCHER" || { echo "ERROR: launcher does not export BUN_SELF_EXE" >&2; exit 1; }
+          grep -aqF 'BUN_SELF_EXE' "$LIBEXEC" || { echo "ERROR: Bun runtime lacks the BUN_SELF_EXE override" >&2; exit 1; }
           echo "=== Staged layout ==="
           find "${WORK_DIR}/dist" -maxdepth 3 -type f | sort
 
@@ -542,12 +549,13 @@ jobs:
           compression-level: 6
 
       # ======================================================================
-      # Release (only on tag push)
+      # Release (tag push, or manual workflow_dispatch with release_tag)
       # ======================================================================
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           files: |
             ${{ env.WORK_DIR }}/packages/*.zip
             ${{ env.WORK_DIR }}/packages/opencode-*-android-aarch64.tar.xz
@@ -558,25 +566,49 @@ jobs:
           body: |
             ## OpenCode ${{ env.OPENCODE_VERSION }} for Android/Termux (aarch64)
 
-            ### Installation
+            Built from commit `${{ github.sha }}` with the Termux `/proc/self/exe`
+            fix: the launcher exports `BUN_SELF_EXE`, and the Bun runtime honors it,
+            so the embedded module graph loads even when Termux enters the binary
+            through `linker64`.
+
+            ### Install (root-free, recommended)
+
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.release_tag || github.ref_name }}/install-termux.sh
+            chmod +x install-termux.sh
+            ./install-termux.sh https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.release_tag || github.ref_name }}/opencode-${{ env.OPENCODE_VERSION }}-android-aarch64.tar.xz
+            ```
+
+            The installer verifies `SHA256SUMS`, checks the aarch64 ELF headers, and
+            backs up an existing launcher.
+
+            ### Archives
+
+            The `.zip` and `.tar.xz` contain the complete `$PREFIX` layout
+            (`bin/opencode`, `libexec/opencode/opencode.bin`, `lib/*.so`):
+
+            ```bash
+            unzip -o opencode-${{ env.OPENCODE_VERSION }}-android-aarch64.zip -d "$PREFIX"
+            # or
+            tar -xJf opencode-${{ env.OPENCODE_VERSION }}-android-aarch64.tar.xz -C "$PREFIX"
+            ```
+
+            ### Package manager
 
             **Termux (pacman):**
             ```bash
-            # Download the .pkg.tar.xz file, then:
             pacman -U opencode-${{ env.OPENCODE_VERSION }}-1-aarch64.pkg.tar.xz
             ```
 
             **Termux (dpkg):**
             ```bash
-            # Download the .deb file, then:
             dpkg -i opencode_${{ env.OPENCODE_VERSION }}_aarch64.deb
             ```
 
-            **Standalone binary:**
+            ### Verify
+
             ```bash
-            # Download and extract the .zip, then:
-            chmod +x opencode
-            mv opencode $PREFIX/bin/
+            opencode --version   # ${{ env.OPENCODE_VERSION }}
             ```
 
             ### Build info
@@ -615,6 +647,9 @@ jobs:
     if: always() && needs.build-android-aarch64.result == 'success'
     timeout-minutes: 10
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -696,3 +731,27 @@ jobs:
             echo "ERROR: Binary not found in package"
             exit 1
           fi
+
+      - name: Verify launcher self-exe override and module graph
+        run: |
+          LAUNCHER="artifacts/extracted/bin/opencode"
+          BINARY="$(find artifacts/extracted -name 'opencode.bin' -type f | head -1)"
+          [ -x "$LAUNCHER" ] || { echo "ERROR: packaged launcher missing at $LAUNCHER" >&2; exit 1; }
+          [ -n "$BINARY" ] || { echo "ERROR: packaged opencode.bin missing" >&2; exit 1; }
+          sh -n "$LAUNCHER"
+          grep -qF 'export BUN_SELF_EXE=' "$LAUNCHER" || { echo "ERROR: packaged launcher does not export BUN_SELF_EXE" >&2; exit 1; }
+          grep -aqF 'BUN_SELF_EXE' "$BINARY" || { echo "ERROR: packaged runtime lacks the BUN_SELF_EXE override" >&2; exit 1; }
+          python3 scripts/transplant-bun-graph.py verify "$BINARY" --expect-stride "$MODULE_GRAPH_STRIDE"
+          file artifacts/extracted/lib/libopentui.so | grep -q "aarch64" || { echo "ERROR: packaged libopentui.so is not aarch64" >&2; exit 1; }
+
+      - name: Test the root-free installer with every archive
+        run: |
+          for artifact in artifacts/opencode-*.zip artifacts/opencode-*android-aarch64.tar.xz artifacts/opencode_*.deb artifacts/opencode-*.pkg.tar.xz; do
+            [ -f "$artifact" ] || continue
+            prefix="$(mktemp -d)"
+            bash artifacts/install-termux.sh --prefix "$prefix" "$artifact"
+            test -x "$prefix/bin/opencode"
+            test -s "$prefix/libexec/opencode/opencode.bin"
+            test -f "$prefix/lib/libopentui.so"
+            rm -rf "$prefix"
+          done
