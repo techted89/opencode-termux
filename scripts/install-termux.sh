@@ -500,6 +500,13 @@ check_version() {
     [ "$status" -eq 0 ] || die "opencode --version failed (exit $status): $out"
     case "$out" in
         *1.2.13*|*"Usage: bun"*|*"Bun v"*)
+            local direct_out direct_status
+            if have timeout; then
+                direct_out="$(LD_LIBRARY_PATH="$prefix/lib" BUN_SELF_EXE="$prefix/libexec/opencode/opencode.bin" timeout 30 "$prefix/libexec/opencode/opencode.bin" --version 2>&1)" && direct_status=0 || direct_status=$?
+            else
+                direct_out="$(LD_LIBRARY_PATH="$prefix/lib" BUN_SELF_EXE="$prefix/libexec/opencode/opencode.bin" "$prefix/libexec/opencode/opencode.bin" --version 2>&1)" && direct_status=0 || direct_status=$?
+            fi
+            printf '>>> Direct BUN_SELF_EXE test (exit %s): %s\n' "$direct_status" "${direct_out:-<no output>}" >&2
             die "opencode fell back to Bun ($out); BUN_SELF_EXE is not taking effect"
             ;;
     esac

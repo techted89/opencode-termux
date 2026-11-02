@@ -1,20 +1,24 @@
 diff --git a/src/StandaloneModuleGraph.zig b/src/StandaloneModuleGraph.zig
-index 267d1f8..7794bdf 100644
 --- a/src/StandaloneModuleGraph.zig
 +++ b/src/StandaloneModuleGraph.zig
-@@ -1009,6 +1009,15 @@ pub const StandaloneModuleGraph = struct {
- 
-         switch (Environment.os) {
-             .linux => {
-+                // BUN_SELF_EXE override: Termux may invoke the executable through
-+                // the dynamic linker, so /proc/self/exe points at linker64, not at
-+                // the file that contains the module graph.
-+                if (bun.getenvZ("BUN_SELF_EXE")) |self_exe_override| {
-+                    if (std.fs.cwd().openFile(self_exe_override, .{})) |file| {
-+                        return .fromStdFile(file);
-+                    } else |_| {}
-+                }
+@@ -1016,9 +1016,20 @@ pub const StandaloneModuleGraph = struct {
+     fn openSelf() std.fs.OpenSelfExeError!bun.FileDescriptor {
++        // BUN_SELF_EXE override: Termux may invoke the executable through the
++        // dynamic linker, so /proc/self/exe points at linker64 rather than at
++        // the file containing the module graph. Check this before the
++        // isBuiltInExe(argv[0]) heuristic, which can see a synthesized "bun"
++        // argv for a standalone app and return FileNotFound early.
++        if (bun.getenvZ("BUN_SELF_EXE")) |self_exe_override| {
++            if (std.fs.openFileAbsoluteZ(self_exe_override, .{})) |file| {
++                return .fromStdFile(file);
++            } else |_| {}
++        }
 +
-                 if (std.fs.openFileAbsoluteZ("/proc/self/exe", .{})) |easymode| {
-                     return .fromStdFile(easymode);
-                 } else |_| {
+         if (!Environment.isWindows) {
+             const argv = bun.argv;
+             if (argv.len > 0) {
+                 if (isBuiltInExe(u8, argv[0])) {
+                     return error.FileNotFound;
+                 }
+             }
+         }
