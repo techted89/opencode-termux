@@ -11,12 +11,10 @@ export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export BUN_VERSION="${BUN_VERSION:-1.2.13}"
 export BUN_TAG="bun-v${BUN_VERSION}"
 # CompiledModuleGraphFile stride inside the standalone module graph:
-#   Bun <= 1.3.2  -> 36 bytes (4 StringPointers + 3 flags + 1 padding)
-#   Bun >= 1.3.11 -> 52 bytes (6 StringPointers + 4 flags), trailing data
-# The Android 1.2.13 runtime is patched to the 32-byte Offsets used by host
-# Bun 1.3.2. scripts/transplant-bun-graph.py enforces 32-byte Offsets and this
-# stride; change to 52 only together with BUN_VERSION (see README "Upgrade
-# status: Bun 1.3.14").
+#   Bun <= 1.3.2  -> 36 bytes (4 StringPointers + 3 flags + 1 padding), Offsets 24 bytes
+#   Bun >= 1.3.11 -> 52 bytes (6 StringPointers + 4 flags), Offsets 32 bytes, trailing data
+# Host and target Bun must agree; scripts/transplant-bun-graph.py enforces this.
+# Change to 52 only together with BUN_VERSION (see README "Upgrade status: Bun 1.3.14").
 export MODULE_GRAPH_STRIDE="${MODULE_GRAPH_STRIDE:-36}"
 export WEBKIT_COMMIT="${WEBKIT_COMMIT:-017930ebf915121f8f593bef61cbbca82d78132d}"
 export ICU_VERSION="${ICU_VERSION:-75.1}"
