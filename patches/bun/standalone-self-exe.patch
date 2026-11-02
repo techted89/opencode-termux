@@ -9,7 +9,7 @@ diff --git a/src/StandaloneModuleGraph.zig b/src/StandaloneModuleGraph.zig
 +        // isBuiltInExe(argv[0]) heuristic, which can see a synthesized "bun"
 +        // argv for a standalone app and return FileNotFound early.
 +        if (bun.getenvZ("BUN_SELF_EXE")) |self_exe_override| {
-+            if (std.fs.openFileAbsoluteZ(self_exe_override, .{})) |file| {
++            if (std.fs.openFileAbsoluteZ(self_exe_override.ptr, .{})) |file| {
 +                return .fromStdFile(file);
 +            } else |_| {}
 +        }
